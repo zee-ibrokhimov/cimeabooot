@@ -106,6 +106,19 @@ export async function POST(request: Request) {
          ${country}, ${city}, ${ipHash})
     `;
 
+    // One-slot-per-user cap. Reaching the payment page means this user secured a
+    // slot (the race is won at "Confirm"; payment itself has no countdown), so
+    // their one allowed use is spent: deactivate the account and revoke sessions
+    // so they cannot grab a second slot. Users who never reach payment keep
+    // unlimited retries. The owner can re-enable someone from /dashboard/users
+    // (e.g. if their payment failed and they need another attempt).
+    // Note: this is client-reported — the server has no independent view of the
+    // CIMEA/Nexi page, so it trusts the extension to send this event.
+    if (clean.event === 'payment_page_reached') {
+      await sql`UPDATE users SET active = false WHERE id = ${sessionUser.userId} AND active = true`;
+      await sql`DELETE FROM sessions WHERE user_id = ${sessionUser.userId}`;
+    }
+
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     console.error('track POST error:', error);
