@@ -1,0 +1,43 @@
+# CIMEA Helper Pro — full stack (dashboard + PostgreSQL).
+#
+# Quick start on any Docker host (or a Proxmox LXC/VM):
+#   1) cp .env.compose.example .env   and fill in the values
+#   2) docker compose up -d --build
+#   3) open http://SERVER_IP:3000  (put HTTPS in front of it — see SETUP.md)
+#
+# Coolify: you can also deploy this as a "Docker Compose" resource pointing at
+# your repo, or use the git/Dockerfile flow in SETUP.md.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cimea}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-cimea}
+    volumes:
+      - cimea_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cimea} -d ${POSTGRES_DB:-cimea}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  app:
+    build:
+      context: ./dashboard
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cimea}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-cimea}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}
+      IP_SALT: ${IP_SALT:-}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  cimea_db:
