@@ -1,7 +1,7 @@
 import { sql } from '../lib/db';
 import { cookies } from 'next/headers';
 import React from 'react';
-import { Activity, Globe, CheckCircle2, RefreshCw, Clock, Users, Download } from 'lucide-react';
+import { Activity, Globe, CheckCircle2, RefreshCw, Clock, Users, Download, ChevronDown, CreditCard } from 'lucide-react';
 import Link from 'next/link';
 import { checkAdminToken } from '../lib/analytics';
 import LoginForm from './LoginForm';
@@ -12,6 +12,8 @@ export const dynamic = 'force-dynamic';
 type LogRow = {
   id: number;
   event_type: string;
+  user_id: number | null;
+  user_label: string | null;
   client_id: string | null;
   session_id: string | null;
   step: string | null;
@@ -21,6 +23,16 @@ type LogRow = {
   country: string | null;
   city: string | null;
   created_at: string;
+};
+
+type UserGroup = {
+  key: string;
+  label: string;
+  events: LogRow[];
+  lastAt: string;
+  location: string;
+  reachedPay: boolean;
+  success: boolean;
 };
 
 export default async function DashboardPage() {
@@ -44,7 +56,14 @@ export default async function DashboardPage() {
 
   try {
     const [logsRes, countsRes, usersRes, retriesRes, countriesRes] = await Promise.all([
-      sql<LogRow>`SELECT * FROM usage_logs ORDER BY created_at DESC LIMIT 200;`,
+      sql<LogRow>`
+        SELECT l.id, l.event_type, l.user_id, l.client_id, l.session_id, l.step,
+               l.retries, l.duration_ms, l.error_type, l.country, l.city, l.created_at,
+               COALESCE(u.telegram_username, u.email,
+                        CASE WHEN l.user_id IS NOT NULL THEN 'user #' || l.user_id END,
+                        'anonymous') AS user_label
+        FROM usage_logs l LEFT JOIN users u ON u.id = l.user_id
+        ORDER BY l.created_at DESC LIMIT 500;`,
       sql`SELECT event_type, COUNT(*)::int AS n FROM usage_logs GROUP BY event_type;`,
       sql`SELECT COUNT(DISTINCT client_id)::int AS n FROM usage_logs WHERE client_id IS NOT NULL;`,
       sql`SELECT COALESCE(SUM(retries),0)::int AS n FROM usage_logs WHERE event_type = 'save_next_clicked';`,
@@ -68,6 +87,28 @@ export default async function DashboardPage() {
   const success = counts['payment_success'] || 0;
   const totalEvents = Object.values(counts).reduce((a, b) => a + b, 0);
   const successRate = started > 0 ? Math.round((success / started) * 100) : 0;
+
+  // Group the recent-events feed by user so it isn't one long flat list. Logs
+  // arrive newest-first, so the first row seen for a user is their latest.
+  const groupsMap = new Map<string, UserGroup>();
+  for (const log of logs) {
+    const key = log.user_id != null ? `u${log.user_id}` : (log.client_id ? `c${log.client_id}` : 'anon');
+    let g = groupsMap.get(key);
+    if (!g) {
+      g = {
+        key, label: log.user_label || 'anonymous', events: [], lastAt: log.created_at,
+        location: [log.city, log.country].filter(Boolean).join(', '), reachedPay: false, success: false,
+      };
+      groupsMap.set(key, g);
+    }
+    g.events.push(log);
+    if (!g.location) g.location = [log.city, log.country].filter(Boolean).join(', ');
+    if (log.event_type === 'payment_page_reached') g.reachedPay = true;
+    if (log.event_type === 'payment_success') g.success = true;
+  }
+  const userGroups = Array.from(groupsMap.values()).sort(
+    (a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime(),
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 font-sans p-6 md:p-12">
@@ -128,46 +169,69 @@ export default async function DashboardPage() {
           </Panel>
         </div>
 
-        {/* Recent events */}
+        {/* Activity grouped by user (collapsible) */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-800 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-emerald-400" />
-            <span className="font-semibold">Recent Events</span>
+          <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-emerald-400" />
+              <span className="font-semibold">Activity by user</span>
+            </div>
+            <span className="text-xs text-slate-500">
+              {userGroups.length} {userGroups.length === 1 ? 'user' : 'users'} · {logs.length} recent events
+            </span>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="bg-slate-800/50 text-slate-400 border-b border-slate-800">
-                <tr>
-                  <th className="px-6 py-3 font-medium">Event</th>
-                  <th className="px-6 py-3 font-medium">Step</th>
-                  <th className="px-6 py-3 font-medium">Location</th>
-                  <th className="px-6 py-3 font-medium">Retries</th>
-                  <th className="px-6 py-3 font-medium">Time</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {logs.length === 0 && !dbError && (
-                  <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">No events yet.</td></tr>
-                )}
-                {logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="px-6 py-3">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${badgeClass(log.event_type)}`}>
-                        {log.event_type.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3 text-slate-400">{log.step || '—'}</td>
-                    <td className="px-6 py-3 text-slate-400">
-                      <span className="inline-flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{[log.city, log.country].filter(Boolean).join(', ') || '—'}</span>
-                    </td>
-                    <td className="px-6 py-3 text-slate-400">{log.retries ?? '—'}</td>
-                    <td className="px-6 py-3 text-slate-400">
-                      <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{new Date(log.created_at).toLocaleString()}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {userGroups.length === 0 && !dbError && (
+            <div className="px-6 py-8 text-center text-slate-500">No events yet.</div>
+          )}
+          <div className="divide-y divide-slate-800/50">
+            {userGroups.map((g) => (
+              <details key={g.key} className="group">
+                <summary className="px-6 py-4 flex items-center justify-between gap-3 cursor-pointer hover:bg-slate-800/30 list-none [&::-webkit-details-marker]:hidden">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="font-medium truncate">{g.label}</span>
+                    {g.success
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border bg-emerald-500/10 border-emerald-500/20 text-emerald-400"><CheckCircle2 className="w-3 h-3" /> paid</span>
+                      : g.reachedPay
+                        ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border bg-cyan-500/10 border-cyan-500/20 text-cyan-300"><CreditCard className="w-3 h-3" /> reached payment</span>
+                        : null}
+                    {g.location && <span className="hidden sm:inline-flex items-center gap-1 text-xs text-slate-500"><Globe className="w-3 h-3" />{g.location}</span>}
+                  </div>
+                  <div className="flex items-center gap-4 text-sm text-slate-400 shrink-0">
+                    <span>{g.events.length} {g.events.length === 1 ? 'event' : 'events'}</span>
+                    <span className="hidden sm:inline">{new Date(g.lastAt).toLocaleString()}</span>
+                    <ChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
+                  </div>
+                </summary>
+                <div className="overflow-x-auto bg-slate-950/40 border-t border-slate-800/50">
+                  <table className="w-full text-left text-sm whitespace-nowrap">
+                    <thead className="text-slate-500">
+                      <tr>
+                        <th className="px-6 py-2 font-medium">Event</th>
+                        <th className="px-6 py-2 font-medium">Step</th>
+                        <th className="px-6 py-2 font-medium">Retries</th>
+                        <th className="px-6 py-2 font-medium">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {g.events.map((log) => (
+                        <tr key={log.id} className="hover:bg-slate-800/20">
+                          <td className="px-6 py-2">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${badgeClass(log.event_type)}`}>
+                              {log.event_type.replace(/_/g, ' ')}
+                            </span>
+                          </td>
+                          <td className="px-6 py-2 text-slate-400">{log.step || '—'}</td>
+                          <td className="px-6 py-2 text-slate-400">{log.retries ?? '—'}</td>
+                          <td className="px-6 py-2 text-slate-400">
+                            <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{new Date(log.created_at).toLocaleTimeString()}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ))}
           </div>
         </div>
       </div>

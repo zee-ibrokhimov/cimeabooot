@@ -6,19 +6,15 @@
 
 var CIMEA_CONFIG = {
   // -------------------------------------------------------------------------
-  // MODE SWITCH.
-  //   true  = gated: users must log in against your server to run automation.
-  //   false = standalone/personal: NO server, NO login — the automation just
-  //           runs. Analytics is off (nothing to send to). Use this to run the
-  //           extension for yourself with no backend at all.
+  // Login is ALWAYS required — there is no off-switch. Automation only runs
+  // with a valid session issued by your server (enforced in background.js).
+  // This used to be a REQUIRE_LOGIN flag; it was removed so nobody can flip one
+  // line to disable the gate.
   // -------------------------------------------------------------------------
-  REQUIRE_LOGIN: true,
 
   // -------------------------------------------------------------------------
-  // Your server base URL (only used when REQUIRE_LOGIN is true). Bake your URL
-  // here so your users don't have to type it. Example:
-  //   "https://cimea.yourdomain.com"
-  // Derived endpoints:  <base>/api/auth/login , <base>/api/track , ...
+  // Your server base URL. Baked in so users don't type it.
+  //   Derived endpoints:  <base>/api/auth/code , <base>/api/track , ...
   // -------------------------------------------------------------------------
   DEFAULT_SERVER_BASE: "https://cimea.zeehub.xyz",
 

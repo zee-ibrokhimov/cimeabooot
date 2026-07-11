@@ -86,19 +86,10 @@ document.addEventListener("DOMContentLoaded", () => {
     els.accountView.style.display = "none";
     els.tool.style.display = "none";
   }
-  // Standalone/personal mode: no server, no login — just show the tool.
-  function showStandalone() {
-    const auth = document.getElementById("auth-section");
-    if (auth) auth.style.display = "none";
-    els.tool.style.display = "block";
-    const sub = document.querySelector(".subtitle");
-    if (sub) sub.textContent = t("subtitle_standalone");
-  }
-
   send({ type: "authStatus" }).then((s) => {
     els.serverBase.value = s.serverBase || CFG.DEFAULT_SERVER_BASE || "";
-    if (s.requireLogin === false) showStandalone();
-    else if (s.loggedIn) showLoggedIn();
+    // Login is always required — no standalone mode.
+    if (s.loggedIn) showLoggedIn();
     else showLoggedOut();
   });
 

@@ -172,7 +172,6 @@ async function verifyAuth() {
 
 // Cached authorization: fresh session within the TTL, else verify/re-activate.
 async function isAuthorized() {
-  if (!CFG.REQUIRE_LOGIN) return true; // standalone/personal mode — no gate
   const { authToken, authVerifiedAt } = await sessionGet(["authToken", "authVerifiedAt"]);
   if (authToken && authVerifiedAt && (Date.now() - authVerifiedAt) < CFG.AUTH_VERIFY_TTL_MS) return true;
   if (await verifyAuth()) return true;
@@ -185,7 +184,6 @@ async function isAuthorized() {
 // Like isAuthorized() but ALWAYS hits the server (no TTL cache) so the mid-run
 // recheck catches revocation promptly. Still honors the transient-failure grace.
 async function isAuthorizedLive() {
-  if (!CFG.REQUIRE_LOGIN) return true;
   const { authVerifiedAt } = await sessionGet(["authVerifiedAt"]);
   if (await verifyAuth()) return true;
   const { authToken: stillHave } = await sessionGet(["authToken"]);
@@ -213,7 +211,7 @@ async function authStatus() {
   const { accessCode } = await storageGet(["accessCode"]);
   const base = await getServerBase();
   return {
-    requireLogin: !!CFG.REQUIRE_LOGIN,
+    requireLogin: true, // login is always required — no off-switch
     loggedIn: !!accessCode, // the code is the persistent credential
     serverBase: base
   };
