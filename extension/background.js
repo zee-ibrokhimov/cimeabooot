@@ -58,7 +58,12 @@ async function applyFastLoad(enabled) {
           action: { type: "block" },
           condition: {
             initiatorDomains: ["cimea-diplome.it"],
-            resourceTypes: ["image", "font", "media"]
+            // Block everything non-essential to rendering the DOM + running the
+            // app: images, fonts, media, plugins/embeds, and "other" (icon
+            // sprites like icons.svg, favicons, prefetch, beacons). We keep
+            // script / stylesheet / xmlhttprequest / websocket so the SPA still
+            // works and the bot can read + click the page.
+            resourceTypes: ["image", "font", "media", "object", "other", "ping", "csp_report"]
           }
         }]
       });

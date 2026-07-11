@@ -116,10 +116,12 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
         chrome.tabs.sendMessage(tab.id, { action: "refreshSession" }, (r) => {
-          void chrome.runtime.lastError;
+          const err = chrome.runtime.lastError;
           if (!status) return;
-          if (r && r.ok) status.textContent = t("status_refresh_ok");
-          else if (r && r.reason === "playbook") status.textContent = t("status_refresh_login");
+          // No response => the content script isn't on this (already-open) tab.
+          if (err || !r) { status.textContent = t("status_refresh_reload"); return; }
+          if (r.ok) status.textContent = t("status_refresh_ok");
+          else if (r.reason === "playbook") status.textContent = t("status_refresh_login");
           else status.textContent = t("status_refresh_none");
         });
       });
