@@ -34,9 +34,51 @@
   let failAlerted = false;      // so we alert about a failed payment only once
   let procWarned = false;       // so we warn about a missing procedure card only once
 
-  // Detection phrase lists live in config.js so wordings are easy to tune.
-  const DETECT = (CFG && CFG.DETECT) || {};
+  // Layer 3: detection phrases + DOM selectors come from the server "playbook"
+  // (fetched via the background with a valid session), NOT from local config.
+  // Without a playbook the automation refuses to run (no recipe to execute).
+  let PLAYBOOK = null;
+  let DETECT = {};
+  let SEL = {};
+  const RE = {}; // compiled regexes from the playbook
   const hasAny = (text, list) => Array.isArray(list) && list.some((p) => p && text.includes(p));
+
+  function applyPlaybook(pb) {
+    PLAYBOOK = pb;
+    DETECT = (pb && pb.detect) || {};
+    SEL = (pb && pb.selectors) || {};
+    RE.urgency = SEL.urgency_re ? new RegExp(SEL.urgency_re) : null;
+    RE.ordinary = SEL.ordinary_re ? new RegExp(SEL.ordinary_re) : null;
+    RE.keepalive = SEL.keepalive_re ? new RegExp(SEL.keepalive_re, "i") : null;
+    RE.captchaIframe = SEL.captcha_iframe_re ? new RegExp(SEL.captcha_iframe_re, "i") : null;
+  }
+
+  // Ask the background for the (session-gated) playbook and apply it. Resolves
+  // true only if we now hold a usable recipe.
+  function loadPlaybook() {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ type: "getPlaybook" }, (r) => {
+          void chrome.runtime.lastError;
+          if (r && r.ok && r.playbook && r.playbook.selectors) {
+            applyPlaybook(r.playbook);
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        });
+      } catch (_) { resolve(false); }
+    });
+  }
+
+  // Ready = a valid session AND a loaded playbook. Both are required to run.
+  async function ensureReady(live) {
+    const ok = await checkAuthorized(live);
+    if (!ok) return { ok: false, reason: "auth" };
+    const pb = await loadPlaybook();
+    if (!pb) return { ok: false, reason: "playbook" };
+    return { ok: true };
+  }
 
   // Read the page text WITHOUT the extension's own drawer — otherwise the bot's
   // own log lines (e.g. "No availability") would match DETECT on the next tick
@@ -161,13 +203,13 @@
     if (res.procedure) procedure = res.procedure;
     if (res.speed) actionDelay = parseInt(res.speed, 10) || 1000;
     if (res.automationActive) {
-      // Only auto-resume if the session is still valid.
-      checkAuthorized().then((ok) => {
-        if (!ok) {
+      // Only auto-resume if the session is valid AND we have the server recipe.
+      ensureReady().then((r) => {
+        if (!r.ok) {
           isPaused = true;
           chrome.storage.local.set({ automationActive: false });
           injectDrawer();
-          logToDrawer(t("d_login_required"));
+          logToDrawer(t(r.reason === "playbook" ? "d_no_playbook" : "d_login_required"));
           return;
         }
         isPaused = false;
@@ -214,7 +256,7 @@
     document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
     const keep = Array.from(document.querySelectorAll("button")).find((btn) => {
       const t = (btn.innerText || "").toLowerCase();
-      return /stay logged in|extend|prolunga|mantieni|continue/.test(t);
+      return RE.keepalive ? RE.keepalive.test(t) : false;
     });
     if (keep && keep.offsetParent !== null && !keep.disabled) {
       keep.click();
@@ -281,10 +323,10 @@
         return;
       }
 
-      // Resuming — requires a valid session.
-      checkAuthorized().then((ok) => {
-        if (!ok) {
-          logToDrawer(t("d_not_logged_in"));
+      // Resuming — requires a valid session AND the server recipe.
+      ensureReady().then((r) => {
+        if (!r.ok) {
+          logToDrawer(t(r.reason === "playbook" ? "d_no_playbook" : "d_not_logged_in"));
           return;
         }
         isPaused = false;
@@ -331,13 +373,13 @@
   // ---------------------------------------------------------------------------
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request && request.action === "startAutomation") {
-      // Server-gated: never run without a valid session.
-      checkAuthorized().then((ok) => {
-        if (!ok) {
+      // Server-gated: never run without a valid session AND the server recipe.
+      ensureReady().then((r) => {
+        if (!r.ok) {
           isPaused = true;
           chrome.storage.local.set({ automationActive: false });
           injectDrawer();
-          logToDrawer(t("d_not_logged_in"));
+          logToDrawer(t(r.reason === "playbook" ? "d_no_playbook" : "d_not_logged_in"));
           sendResponse({ status: "unauthorized" });
           return;
         }
@@ -373,20 +415,20 @@
     // Match the card by its LABEL text (the Urgency card's description also
     // mentions "Ordinary procedure", so match the label span, not the whole card).
     let target = null;
-    const cards = Array.from(document.querySelectorAll(".cd-radio-card"));
+    const cards = Array.from(document.querySelectorAll(SEL.procedure_card));
     for (const c of cards) {
-      const lblEl = c.querySelector(".cd-radio-label");
+      const lblEl = c.querySelector(SEL.procedure_label);
       const lbl = (lblEl ? lblEl.innerText : "").toLowerCase().trim();
       if (!lbl) continue;
-      const isUrg = /urgen/.test(lbl);
-      const isOrd = /ordinar/.test(lbl);
+      const isUrg = RE.urgency ? RE.urgency.test(lbl) : false;
+      const isOrd = RE.ordinary ? RE.ordinary.test(lbl) : false;
       // Symmetric guard — require the exclusive match on both branches.
       if (wantUrgency ? (isUrg && !isOrd) : (isOrd && !isUrg)) { target = c; break; }
     }
     // Fallback: match the radio input by value (false = ordinary, true = urgency).
     if (!target) {
       const input = document.querySelector(
-        `input.cd-radio-input[value="${wantUrgency ? "true" : "false"}"]`
+        SEL.procedure_input + '[value="' + (wantUrgency ? "true" : "false") + '"]'
       );
       if (input) target = input.closest("label") || input;
     }
@@ -397,12 +439,12 @@
     // Resolve the card element + the radio input robustly, whether `target` is a
     // card <label> or a bare <input> — so "already selected" is detected either
     // way (avoids re-clicking a checked radio forever).
-    const card = (target.closest && target.closest(".cd-radio-card")) || target;
+    const card = (target.closest && target.closest(SEL.procedure_card)) || target;
     const radio = (target.matches && target.matches('input[type="radio"]'))
       ? target
       : (target.querySelector && target.querySelector('input[type="radio"]'));
     const isSelected =
-      (card.classList && card.classList.contains("cd-radio-card-checked")) ||
+      (card.classList && card.classList.contains(SEL.procedure_card_checked_class)) ||
       (radio && radio.checked);
     if (isSelected) return false; // already the right choice -> proceed to Save
     logToDrawer(t(wantUrgency ? "d_proc_urgency" : "d_proc_ordinary"));
@@ -417,7 +459,7 @@
     isNavigating = true;
     const home = Array.from(document.querySelectorAll("a,div,span,li")).find((el) => {
       const txt = (el.innerText || "").trim().toLowerCase();
-      return txt === "homepage" || txt === "home";
+      return (SEL.home_text || []).includes(txt);
     });
     if (home) home.click();
     else if (isCimea()) location.hash = "#/";
@@ -433,7 +475,7 @@
     // Re-check authorization periodically; refuse to act while unauthorized so a
     // revoked/disabled user is stopped mid-run (not just at start).
     maybeRecheckAuth();
-    if (!authOk) return;
+    if (!authOk || !PLAYBOOK) return; // need auth AND the server recipe
     const pageText = getPageText();
     const hash = location.hash.toLowerCase();
 
@@ -442,7 +484,7 @@
     // until a challenge fires — NOT the always-present 'anchor' checkbox widget,
     // which would false-pause on any page that merely loads reCAPTCHA.
     const captchaEl = Array.from(document.querySelectorAll("iframe")).find((f) => {
-      if (!/recaptcha\/api2\/bframe|hcaptcha\.com\/(?:challenge|1\/)/i.test(f.src || "")) return false;
+      if (!(RE.captchaIframe && RE.captchaIframe.test(f.src || ""))) return false;
       const r = f.getBoundingClientRect();
       return f.offsetParent !== null && r.width > 10 && r.height > 10;
     });
@@ -556,7 +598,7 @@
       // Advance the wizard: click "Save and next" whenever it's present + enabled.
       const saveBtn = Array.from(document.querySelectorAll("button")).find((el) => {
         const txt = (el.innerText || "").toLowerCase();
-        return txt.includes("save and next") || txt.includes("salva e continua");
+        return (SEL.save_next_text || []).some((s) => txt.includes(s));
       });
       if (saveBtn && !saveBtn.disabled && saveBtn.offsetParent !== null) {
         logToDrawer(t("d_clicking_savenext"));
@@ -572,7 +614,7 @@
     // (return) so the success/nexi handlers below never run on the request list —
     // where a prior request's status text could otherwise be misread.
     if (hash === "#/" || hash.includes("#/home") ||
-        (pageText.includes("my requests") && !hash.includes("#/service") && !hash.includes("#/request"))) {
+        (SEL.my_requests_text && pageText.includes(SEL.my_requests_text) && !hash.includes("#/service") && !hash.includes("#/request"))) {
       handleDraftFlow();
       return;
     }
@@ -629,7 +671,7 @@
   function handleDraftFlow() {
     const drafts = Array.from(document.querySelectorAll("span,p,div,button,a")).filter((el) => {
       const t = (el.innerText || "").trim().toLowerCase();
-      return (t === "draft" || t === "bozza") && el.offsetParent !== null;
+      return (SEL.draft_text || []).includes(t) && el.offsetParent !== null;
     });
     if (drafts.length === 0) return;
     drafts.sort((a, b) => depth(b) - depth(a));
@@ -637,7 +679,7 @@
 
     const completes = Array.from(document.querySelectorAll("button,a,div,span,li,p")).filter((el) => {
       const t = (el.innerText || "").toLowerCase().trim();
-      return (t === "complete" || t === "completa" || t === "complete request" || t === "completa richiesta") &&
+      return (SEL.complete_text || []).includes(t) &&
         el.offsetParent !== null && t.length < 30;
     }).sort((a, b) => depth(b) - depth(a));
 
@@ -674,9 +716,8 @@
   // Selectors are constrained to real card fields (no generic input[type=tel]).
   // ---------------------------------------------------------------------------
   function maybeFillCard() {
-    const ccInput = document.querySelector(
-      'input[name="cardnumber"],input[autocomplete="cc-number"],input[name="pan"]'
-    );
+    if (!SEL.card_number) return;
+    const ccInput = document.querySelector(SEL.card_number);
     if (!ccInput || ccInput.hasAttribute("data-cimea-filled")) return;
     chrome.storage.local.get(["cardName", "cardNum", "cardExp", "cardCvc"], (r) => {
       if (!r.cardNum) return;
@@ -689,10 +730,10 @@
           el.dispatchEvent(new Event("change", { bubbles: true }));
         }
       };
-      fill('input[name="cardnumber"],input[autocomplete="cc-number"],input[name="pan"]', r.cardNum);
-      fill('input[autocomplete="cc-name"],input[name="cardholderName"]', r.cardName);
-      fill('input[autocomplete="cc-csc"],input[name="cvc"],input[name="cvv"]', r.cardCvc);
-      fill('input[autocomplete="cc-exp"],input[name="exp-date"],input[name="expiry"]', r.cardExp);
+      fill(SEL.card_number, r.cardNum);
+      fill(SEL.card_name, r.cardName);
+      fill(SEL.card_cvc, r.cardCvc);
+      fill(SEL.card_exp, r.cardExp);
       ccInput.setAttribute("data-cimea-filled", "true");
     });
   }

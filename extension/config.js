@@ -38,61 +38,15 @@ var CIMEA_CONFIG = {
   AUTH_RECHECK_MS: 60 * 1000,
 
   // -------------------------------------------------------------------------
-  // PAGE DETECTION — lowercase phrases matched against the page text. Edit
-  // these to match exactly what CIMEA shows (English + Italian). This is the
-  // one place to tune when the portal changes wording.
+  // PAGE DETECTION + DOM SELECTORS moved to the server (Layer 3). The extension
+  // fetches them from <base>/api/playbook with a valid session and caches them
+  // per run. They are deliberately NOT here, so an offline/edited copy has no
+  // recipe to run, and only logged-in users get updates when CIMEA changes.
   // -------------------------------------------------------------------------
-  DETECT: {
-    server_error: [
-      "502 bad gateway", "504 gateway time-out", "503 service unavailable",
-      "service unavailable", "internal server error"
-    ],
-    blocked: [
-      "too many requests", "rate limit", "unusual traffic",
-      "error 429", "temporarily blocked",
-      "troppe richieste", "traffico insolito", "bloccato temporaneamente"
-    ],
-    maintenance: [
-      "under maintenance", "site is under maintenance", "maintenance in progress",
-      "temporarily unavailable for maintenance", "in manutenzione", "sito in manutenzione"
-    ],
-    captcha_text: [
-      "i'm not a robot", "i’m not a robot", "verify you are human", "are you human",
-      "verifica di sicurezza", "non sono un robot"
-    ],
-    busy: [
-      "high number of payments", "processing a high number",
-      "try again in the next minute", "try again in the next few",
-      "elevato numero di pagamenti", "elevato numero di richieste",
-      "riprova tra qualche minut", "riprova tra pochi minut"
-    ],
-    no_availability: [
-      "no slots available", "no appointments available",
-      "slot no longer available", "this slot is no longer available",
-      "nessun posto disponibile", "posti esauriti", "non ci sono slot disponibili"
-    ],
-    login_required: [
-      "session expired", "your session has expired", "you have been logged out",
-      "session has timed out", "sessione scaduta", "sessione è scaduta"
-    ],
-    payment_failed: [
-      "payment failed", "payment was declined", "your payment was declined",
-      "transaction failed", "payment unsuccessful",
-      "pagamento non riuscito", "pagamento rifiutato", "transazione fallita", "pagamento fallito"
-    ],
-    success: [
-      "payment successful", "payment completed",
-      "pagamento riuscito", "pagamento completato", "pagamento effettuato"
-    ],
-    daily_limit: [
-      "the maximum limit of daily requests has been reached",
-      "il limite massimo di richieste giornaliere"
-    ],
-    processing_time: [
-      "select the processing time", "processing time for your request",
-      "tempo di elaborazione", "seleziona il tempo di elaborazione"
-    ]
-  },
+
+  // How long a fetched playbook is reused before refetching (ms). One fetch per
+  // run/window, not per action — so this adds no per-click latency.
+  PLAYBOOK_TTL_MS: 10 * 60 * 1000,
 
   // -------------------------------------------------------------------------
   // PRIVACY ALLOWLIST — the ONLY fields that may ever leave the device.

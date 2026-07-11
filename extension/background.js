@@ -11,6 +11,11 @@ importScripts("config.js");
 
 const CFG = CIMEA_CONFIG;
 
+// Layer 3: the automation recipe (selectors + detection phrases) lives on the
+// server and is fetched with the session token, then cached briefly. Cleared on
+// logout / session loss so a deauthorized user loses the recipe too.
+let playbookCache = null; // { at: <ts>, data: <playbook> }
+
 // -----------------------------------------------------------------------------
 // Small promise wrappers around chrome.storage so we can use async/await and
 // avoid "Extension context invalidated" crashes after a reload.
@@ -98,6 +103,7 @@ function sessionSet(obj) {
   });
 }
 async function clearSession() {
+  playbookCache = null; // drop the recipe when the session goes away
   await sessionSet({ authToken: "", authVerifiedAt: 0 });
 }
 
@@ -215,6 +221,40 @@ async function authStatus() {
     loggedIn: !!accessCode, // the code is the persistent credential
     serverBase: base
   };
+}
+
+// ---- Playbook (Layer 3): fetch the server-held automation recipe ------------
+async function fetchPlaybook() {
+  const base = await getServerBase();
+  if (!base) return null;
+  const { authToken } = await sessionGet(["authToken"]);
+  if (!authToken) return null; // no session -> no recipe
+  try {
+    const res = await fetch(base + "/api/playbook", {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + authToken },
+      credentials: "omit"
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    if (data && data.ok && data.playbook) {
+      playbookCache = { at: Date.now(), data: data.playbook };
+      return data.playbook;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Serve a fresh-enough cached recipe, else refetch. Falls back to the last good
+// copy if a refetch fails, so a transient blip doesn't stop an in-progress run.
+async function getPlaybook() {
+  const ttl = CFG.PLAYBOOK_TTL_MS || 10 * 60 * 1000;
+  if (playbookCache && (Date.now() - playbookCache.at) < ttl) return playbookCache.data;
+  const fresh = await fetchPlaybook();
+  if (fresh) return fresh;
+  return playbookCache ? playbookCache.data : null;
 }
 
 // -----------------------------------------------------------------------------
@@ -385,6 +425,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
   if (request && request.type === "authStatus") {
     authStatus().then((r) => sendResponse(r));
+    return true; // async
+  }
+  if (request && request.type === "getPlaybook") {
+    getPlaybook().then((pb) => sendResponse({ ok: !!pb, playbook: pb }));
     return true; // async
   }
   if (request && request.type === "isAuthorized") {
