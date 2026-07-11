@@ -20,6 +20,9 @@
   let procedure = "ordinary"; // "ordinary" | "urgency" — chosen on the PROCESSING TIME step
   let isNavigating = false;
   let isPaused = true;          // wait for the user to start
+  let lastActionAt = Date.now(); // last time the bot acted — drives the stuck-load watchdog
+  // Route every "action started" through here so the watchdog sees progress.
+  function setNavigating(v) { isNavigating = v; if (v) lastActionAt = Date.now(); }
   let sessionId = null;
   let runStartedAt = 0;
   let audioCtx = null;          // single reused AudioContext
@@ -98,7 +101,7 @@
   const jitter = (ms) => Math.round(ms * (0.85 + Math.random() * 0.3));
   const settle = () => jitter(actionDelay);
   // On a server 5xx / daily-limit bounce, retry fast (but capped for sanity).
-  const retryDelay = () => jitter(Math.min(actionDelay, 1500));
+  const retryDelay = () => jitter(Math.min(actionDelay, 800));
   // "System busy / try again" notice: retry immediately. The reload itself is
   // paced by page-load time, so this ~200ms floor is effectively instant; it
   // just prevents a zero-delay tight loop. NOTE: retrying this hard against a
@@ -542,7 +545,7 @@
       (radio && radio.checked);
     if (isSelected) return false; // already the right choice -> proceed to Save
     logToDrawer(t(wantUrgency ? "d_proc_urgency" : "d_proc_ordinary"));
-    isNavigating = true;
+    setNavigating(true);
     (card.click ? card : target).click();
     setTimeout(() => { isNavigating = false; }, settle());
     return true;
@@ -550,7 +553,7 @@
 
   // Navigate back to the homepage to keep hunting (daily-limit / no-availability).
   function goHomeToRetry() {
-    isNavigating = true;
+    setNavigating(true);
     const home = Array.from(document.querySelectorAll("a,div,span,li")).find((el) => {
       const txt = (el.innerText || "").trim().toLowerCase();
       return (SEL.home_text || []).includes(txt);
@@ -618,7 +621,7 @@
         track("error", { errorType: "rate_limited" });
       }
       logToDrawer(t("d_blocked"));
-      isNavigating = true;
+      setNavigating(true);
       setTimeout(() => { isNavigating = false; blockAlerted = false; location.reload(); }, jitter(45000));
       return;
     }
@@ -627,7 +630,7 @@
     if (hasAny(pageText, DETECT.maintenance)) {
       logToDrawer(t("d_maintenance"));
       track("error", { errorType: "maintenance" });
-      isNavigating = true;
+      setNavigating(true);
       setTimeout(() => { isNavigating = false; location.reload(); }, jitter(30000));
       return;
     }
@@ -636,7 +639,7 @@
     if (hasAny(pageText, DETECT.server_error)) {
       logToDrawer(t("d_server_error"));
       track("server_crash_detected", { errorType: "server_5xx" });
-      isNavigating = true;
+      setNavigating(true);
       setTimeout(() => { isNavigating = false; location.reload(); }, retryDelay());
       return;
     }
@@ -645,7 +648,7 @@
     if (hasAny(pageText, DETECT.busy)) {
       logToDrawer(t("d_system_busy"));
       bumpRetries("busy_retry");
-      isNavigating = true;
+      setNavigating(true);
       setTimeout(() => { isNavigating = false; location.reload(); }, busyRetryDelay());
       return;
     }
@@ -696,7 +699,7 @@
       });
       if (saveBtn && !saveBtn.disabled && saveBtn.offsetParent !== null) {
         logToDrawer(t("d_clicking_savenext"));
-        isNavigating = true;
+        setNavigating(true);
         saveBtn.click();
         bumpRetries("payment_page");
         setTimeout(() => { isNavigating = false; }, settle());
@@ -779,7 +782,7 @@
 
     if (completes.length > 0) {
       logToDrawer(t("d_clicking_complete"));
-      isNavigating = true;
+      setNavigating(true);
       completes[0].click();
       setTimeout(() => { isNavigating = false; }, settle());
       return;
@@ -797,7 +800,7 @@
     }
     if (actionBtn) {
       logToDrawer(t("d_opening_draft"));
-      isNavigating = true;
+      setNavigating(true);
       actionBtn.click();
       setTimeout(() => { isNavigating = false; }, jitter(900));
     }
@@ -893,6 +896,21 @@
   // their first action by a few hundred ms instead of firing in lockstep.
   setTimeout(checkPageState, 400 + Math.floor(Math.random() * 700));
   setInterval(checkPageState, 1000); // failsafe (survives observer disconnect)
+
+  // Stuck-load watchdog: while actively hunting on CIMEA, if no action has
+  // happened for STUCK_RELOAD_MS the page is likely hung (spinner / pending
+  // request during the rush) — reload to race a fresh response. setNavigating()
+  // keeps lastActionAt fresh on every real action, so this only fires on a true
+  // stall. Never runs on the Nexi payment page (isCimea guard).
+  setInterval(() => {
+    if (isPaused || !authOk || !PLAYBOOK || isNavigating || !isCimea()) return;
+    const stuckMs = CFG.STUCK_RELOAD_MS || 8000;
+    if (Date.now() - lastActionAt > stuckMs) {
+      logToDrawer(t("d_stuck_reload"));
+      setNavigating(true); // mark progress + block re-fire until the reload
+      setTimeout(() => { isNavigating = false; location.reload(); }, jitter(150));
+    }
+  }, 1000);
 
   // Keep the CIMEA session alive whenever the user is logged into the tool —
   // even before automation is started. Gated on the playbook (a valid login).

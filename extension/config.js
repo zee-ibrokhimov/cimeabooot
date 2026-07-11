@@ -43,6 +43,13 @@ var CIMEA_CONFIG = {
   SESSION_REFRESH_MIN_MS: 30 * 60 * 1000, // 30 min
   SESSION_REFRESH_MAX_MS: 50 * 60 * 1000, // 50 min
 
+  // Stuck-load watchdog: during the 15:00 rush CIMEA often HANGS (spinner /
+  // pending request that never resolves). If the bot is active on a CIMEA page
+  // but nothing happens for this long, reload to try a fresh, maybe
+  // less-loaded response instead of waiting. Lower = catch hangs sooner but
+  // reload more (may abandon a slow-but-real load); tune to taste.
+  STUCK_RELOAD_MS: 8 * 1000, // 8s
+
   // -------------------------------------------------------------------------
   // PAGE DETECTION + DOM SELECTORS moved to the server (Layer 3). The extension
   // fetches them from <base>/api/playbook with a valid session and caches them
