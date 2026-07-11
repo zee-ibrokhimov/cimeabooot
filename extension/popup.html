@@ -24,10 +24,13 @@
       <div id="login-view" class="panel">
         <div class="section-title" style="margin-top:0" data-i18n="signin_title">🔑 Activate</div>
         <div class="input-group">
-          <input type="url" id="serverBase" data-i18n-ph="ph_server" placeholder="Server URL (https://…)" autocomplete="off" />
+          <input type="hidden" id="serverBase" />
           <input type="text" id="accessCode" data-i18n-ph="ph_code" placeholder="Access code (from the Telegram bot)" autocomplete="off" spellcheck="false" />
           <button id="loginBtn" class="primary-btn"><span class="btn-icon">→</span> <span data-i18n="login_btn">Activate</span></button>
           <span id="loginStatus" class="hint"></span>
+          <a id="requestCodeBtn" class="secondary-btn" href="https://t.me/cimearadarbot" target="_blank" rel="noopener noreferrer" style="display:block;text-align:center;text-decoration:none;margin-top:4px;">
+            <span data-i18n="request_code_btn">Request a login code</span>
+          </a>
         </div>
       </div>
 

@@ -18,6 +18,10 @@ var CIMEA_CONFIG = {
   // -------------------------------------------------------------------------
   DEFAULT_SERVER_BASE: "https://cimea.zeehub.xyz",
 
+  // Telegram bot the "Request a login code" button opens so users can get their
+  // access code (owner approves it there). Just the bot's public @handle link.
+  TELEGRAM_BOT_URL: "https://t.me/cimearadarbot",
+
   // Whether anonymous analytics is ON by default (user can toggle in popup).
   DEFAULT_ANALYTICS_CONSENT: true,
 

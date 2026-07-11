@@ -93,9 +93,20 @@ document.addEventListener("DOMContentLoaded", () => {
     else showLoggedOut();
   });
 
+  // ---- "Request a login code" -> open the Telegram bot in a new tab --------
+  const requestCodeBtn = $("requestCodeBtn");
+  if (requestCodeBtn) {
+    const botUrl = CFG.TELEGRAM_BOT_URL || requestCodeBtn.getAttribute("href") || "https://t.me/cimearadarbot";
+    requestCodeBtn.setAttribute("href", botUrl);
+    requestCodeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      try { chrome.tabs.create({ url: botUrl }); } catch (_) { window.open(botUrl, "_blank"); }
+    });
+  }
+
   // ---- Activate (Telegram access code) ------------------------------------
   els.loginBtn.addEventListener("click", async () => {
-    const base = (els.serverBase.value || "").trim().replace(/\/+$/, "");
+    const base = (els.serverBase.value || CFG.DEFAULT_SERVER_BASE || "").trim().replace(/\/+$/, "");
     const code = els.accessCode.value.trim();
     if (!base) { els.loginStatus.textContent = t("status_enter_server"); return; }
     if (!code) { els.loginStatus.textContent = t("status_enter_code"); return; }
