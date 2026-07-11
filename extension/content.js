@@ -313,11 +313,23 @@
     }
     return null;
   }
+  // Robust click for framework buttons (Quasar q-btn) that may ignore a bare
+  // .click(): fire the full pointer+mouse sequence, then the real click. Only
+  // one actual 'click' event is dispatched (via el.click()), so it fires once.
+  function robustClick(el) {
+    const o = { bubbles: true, cancelable: true, view: window };
+    try { el.focus && el.focus(); } catch (_) { /* ignore */ }
+    try { el.dispatchEvent(new PointerEvent("pointerdown", o)); } catch (_) { /* ignore */ }
+    try { el.dispatchEvent(new MouseEvent("mousedown", o)); } catch (_) { /* ignore */ }
+    try { el.dispatchEvent(new PointerEvent("pointerup", o)); } catch (_) { /* ignore */ }
+    try { el.dispatchEvent(new MouseEvent("mouseup", o)); } catch (_) { /* ignore */ }
+    try { el.click(); } catch (_) { /* ignore */ }
+  }
   function clickSessionRefresh() {
     if (!isCimea() || !PLAYBOOK) return false;
     const btn = findRefreshBtn();
     if (btn && refreshBtnVisible(btn) && !btn.disabled) {
-      btn.click();
+      robustClick(btn);
       if (document.getElementById("cimea-helper-drawer")) logToDrawer(t("d_session_refreshed"));
       return true;
     }
