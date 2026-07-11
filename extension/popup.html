@@ -85,17 +85,21 @@
             <option value="5000" data-i18n="speed_safe">Safe (5s)</option>
           </select>
         </div>
+        <div class="setting-item column">
+          <div class="setting-info full">
+            <span class="setting-label" data-i18n="proc_label">Processing time</span>
+            <span class="setting-desc" data-i18n="proc_desc">Which option to pick on the request. Urgency costs €100 extra.</span>
+          </div>
+          <select id="procedureController" class="field">
+            <option value="ordinary" data-i18n="proc_ordinary">Ordinary procedure</option>
+            <option value="urgency" data-i18n="proc_urgency">Urgency (+€100)</option>
+          </select>
+        </div>
       </div>
 
       <div class="section-title" data-i18n="analytics_title">📊 Usage Analytics</div>
       <div class="panel">
-        <div class="setting-item plain">
-          <div class="setting-info">
-            <span class="setting-label" data-i18n="analytics_share_label">Share usage statistics</span>
-            <span class="setting-desc" data-i18n="analytics_share_desc">Sent to your server. Never your card details.</span>
-          </div>
-          <label class="switch"><input type="checkbox" id="analyticsConsentToggle" /><span class="slider round"></span></label>
-        </div>
+        <p class="hint" data-i18n="analytics_share_desc">Anonymous usage is shared with the owner. Never your card details.</p>
         <div class="analytics-box">
           <div class="stat-item"><span class="stat-value" id="stat-retries">0</span><span class="stat-label" data-i18n="stat_retries">Total Retries</span></div>
           <div class="stat-item"><span class="stat-value" id="stat-time">0m</span><span class="stat-label" data-i18n="stat_time">Time Saved</span></div>

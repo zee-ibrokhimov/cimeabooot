@@ -246,12 +246,12 @@ async function sendAnalytics(event, meta = {}) {
       return;
     }
 
-    const consent = (await storageGet(["analyticsConsent"])).analyticsConsent !== false; // default on
     const base = await getServerBase();
 
-    // Send nothing unless: analytics on, server configured, and a still-valid
-    // session (revoked sessions stop emitting, not just fail server-side).
-    if (!consent || !base) return;
+    // Usage analytics is always shared with the owner (no user opt-out) — it's
+    // how the owner sees who's using each code + powers sharing detection. Still
+    // gated on a server + a valid session (nothing to send in standalone mode).
+    if (!base) return;
     if (!(await isAuthorized())) return;
     const { authToken: token } = await sessionGet(["authToken"]);
     if (!token) return;
@@ -327,7 +327,7 @@ function isPayloadSafe(payload) {
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await storageGet([
     "fastNav", "autoRetry", "soundAlert",
-    "speed", "analyticsConsent", "serverBase", "fastLoad"
+    "speed", "serverBase", "fastLoad", "procedure"
   ]);
 
   const defaults = {
@@ -335,9 +335,9 @@ chrome.runtime.onInstalled.addListener(async () => {
     autoRetry: existing.autoRetry ?? true,
     soundAlert: existing.soundAlert ?? true,
     speed: existing.speed ?? "1000",
-    analyticsConsent: existing.analyticsConsent ?? CFG.DEFAULT_ANALYTICS_CONSENT,
     serverBase: existing.serverBase ?? CFG.DEFAULT_SERVER_BASE,
-    fastLoad: existing.fastLoad ?? true
+    fastLoad: existing.fastLoad ?? true,
+    procedure: existing.procedure ?? "ordinary" // "ordinary" | "urgency"
   };
   await storageSet(defaults);
   await getClientId();

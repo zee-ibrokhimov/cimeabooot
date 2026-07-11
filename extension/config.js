@@ -87,6 +87,10 @@ var CIMEA_CONFIG = {
     daily_limit: [
       "the maximum limit of daily requests has been reached",
       "il limite massimo di richieste giornaliere"
+    ],
+    processing_time: [
+      "select the processing time", "processing time for your request",
+      "tempo di elaborazione", "seleziona il tempo di elaborazione"
     ]
   },
 

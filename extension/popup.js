@@ -28,8 +28,8 @@ document.addEventListener("DOMContentLoaded", () => {
     soundAlert: $("soundAlertToggle"),
     fastLoad: $("fastLoadToggle"),
     speed: $("speedController"),
+    procedure: $("procedureController"),
     tabCount: $("tabCount"),
-    analyticsConsent: $("analyticsConsentToggle"),
     cardName: $("cardName"),
     cardNum: $("cardNum"),
     cardExp: $("cardExp"),
@@ -147,8 +147,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ---- Settings load ------------------------------------------------------
   const STORAGE_KEYS = [
-    "fastNav", "autoRetry", "soundAlert", "fastLoad", "speed", "tabCount",
-    "analyticsConsent",
+    "fastNav", "autoRetry", "soundAlert", "fastLoad", "speed", "procedure", "tabCount",
     "cardName", "cardNum", "cardExp", "cardCvc",
     "totalRetries"
   ];
@@ -158,8 +157,8 @@ document.addEventListener("DOMContentLoaded", () => {
     els.soundAlert.checked = s.soundAlert !== false;
     els.fastLoad.checked = s.fastLoad !== false;
     els.speed.value = s.speed || "1000";
+    els.procedure.value = s.procedure || "ordinary";
     els.tabCount.value = s.tabCount || "3";
-    els.analyticsConsent.checked = s.analyticsConsent !== false;
     els.cardName.value = s.cardName || "";
     els.cardNum.value = s.cardNum || "";
     els.cardExp.value = s.cardExp || "";
@@ -181,8 +180,8 @@ document.addEventListener("DOMContentLoaded", () => {
       soundAlert: els.soundAlert.checked,
       fastLoad: els.fastLoad.checked,
       speed: els.speed.value,
+      procedure: els.procedure.value,
       tabCount: els.tabCount.value,
-      analyticsConsent: els.analyticsConsent.checked,
       cardName: els.cardName.value.trim(),
       cardNum: els.cardNum.value.replace(/\s+/g, ""),
       cardExp: els.cardExp.value.trim(),
@@ -190,8 +189,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   [
-    els.fastNav, els.autoRetry, els.soundAlert, els.fastLoad, els.speed, els.tabCount,
-    els.analyticsConsent,
+    els.fastNav, els.autoRetry, els.soundAlert, els.fastLoad, els.speed, els.procedure, els.tabCount,
     els.cardName, els.cardNum, els.cardExp, els.cardCvc
   ].forEach((el) => {
     el.addEventListener("change", persist);

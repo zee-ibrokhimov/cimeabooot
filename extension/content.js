@@ -17,6 +17,7 @@
   let lang = (typeof cimeaDefaultLang === "function") ? cimeaDefaultLang() : "en";
   const t = (key) => (typeof cimeaT === "function") ? cimeaT(key, lang) : key;
   let actionDelay = 1000;
+  let procedure = "ordinary"; // "ordinary" | "urgency" — chosen on the PROCESSING TIME step
   let isNavigating = false;
   let isPaused = true;          // wait for the user to start
   let sessionId = null;
@@ -31,6 +32,7 @@
   let blockAlerted = false;     // so we alert about a rate-limit only once
   let loginAlerted = false;     // so we alert about session-expiry only once
   let failAlerted = false;      // so we alert about a failed payment only once
+  let procWarned = false;       // so we warn about a missing procedure card only once
 
   // Detection phrase lists live in config.js so wordings are easy to tune.
   const DETECT = (CFG && CFG.DETECT) || {};
@@ -105,6 +107,7 @@
     blockAlerted = false;
     loginAlerted = false;
     failAlerted = false;
+    procWarned = false;
     // Re-arm the cross-tab "payment succeeded elsewhere" broadcast for this run.
     try { chrome.storage.local.set({ successAlertSent: false, paymentSucceeded: false }); } catch (_) { /* ignore */ }
   }
@@ -153,8 +156,9 @@
   // ---------------------------------------------------------------------------
   // Settings sync
   // ---------------------------------------------------------------------------
-  chrome.storage.local.get(["speed", "automationActive", "lang"], (res) => {
+  chrome.storage.local.get(["speed", "automationActive", "lang", "procedure"], (res) => {
     if (res.lang) lang = res.lang;
+    if (res.procedure) procedure = res.procedure;
     if (res.speed) actionDelay = parseInt(res.speed, 10) || 1000;
     if (res.automationActive) {
       // Only auto-resume if the session is still valid.
@@ -187,6 +191,7 @@
       const b = document.getElementById("cimea-pause-btn");
       if (b) b.innerText = isPaused ? t("d_resume") : t("d_pause");
     }
+    if (changes.procedure) procedure = changes.procedure.newValue || "ordinary";
     if (changes.speed) actionDelay = parseInt(changes.speed.newValue, 10) || 1000;
     if (changes.paymentSucceeded && changes.paymentSucceeded.newValue === true) {
       if (!isPaused && isCimea()) {
@@ -360,6 +365,53 @@
     });
   }
 
+  // On the PROCESSING TIME step, tick the radio matching the user's choice
+  // (Ordinary / Urgency). Returns true if it clicked one this tick, false if the
+  // right option is already selected (so the caller proceeds to Save and next).
+  function selectProcedure() {
+    const wantUrgency = procedure === "urgency";
+    // Match the card by its LABEL text (the Urgency card's description also
+    // mentions "Ordinary procedure", so match the label span, not the whole card).
+    let target = null;
+    const cards = Array.from(document.querySelectorAll(".cd-radio-card"));
+    for (const c of cards) {
+      const lblEl = c.querySelector(".cd-radio-label");
+      const lbl = (lblEl ? lblEl.innerText : "").toLowerCase().trim();
+      if (!lbl) continue;
+      const isUrg = /urgen/.test(lbl);
+      const isOrd = /ordinar/.test(lbl);
+      // Symmetric guard — require the exclusive match on both branches.
+      if (wantUrgency ? (isUrg && !isOrd) : (isOrd && !isUrg)) { target = c; break; }
+    }
+    // Fallback: match the radio input by value (false = ordinary, true = urgency).
+    if (!target) {
+      const input = document.querySelector(
+        `input.cd-radio-input[value="${wantUrgency ? "true" : "false"}"]`
+      );
+      if (input) target = input.closest("label") || input;
+    }
+    if (!target) {
+      if (!procWarned) { procWarned = true; logToDrawer(t("d_proc_not_found")); }
+      return false;
+    }
+    // Resolve the card element + the radio input robustly, whether `target` is a
+    // card <label> or a bare <input> — so "already selected" is detected either
+    // way (avoids re-clicking a checked radio forever).
+    const card = (target.closest && target.closest(".cd-radio-card")) || target;
+    const radio = (target.matches && target.matches('input[type="radio"]'))
+      ? target
+      : (target.querySelector && target.querySelector('input[type="radio"]'));
+    const isSelected =
+      (card.classList && card.classList.contains("cd-radio-card-checked")) ||
+      (radio && radio.checked);
+    if (isSelected) return false; // already the right choice -> proceed to Save
+    logToDrawer(t(wantUrgency ? "d_proc_urgency" : "d_proc_ordinary"));
+    isNavigating = true;
+    (card.click ? card : target).click();
+    setTimeout(() => { isNavigating = false; }, settle());
+    return true;
+  }
+
   // Navigate back to the homepage to keep hunting (daily-limit / no-availability).
   function goHomeToRetry() {
     isNavigating = true;
@@ -483,17 +535,25 @@
       return;
     }
 
-    // Payment / service page
-    if (hash.includes("#/service") || hash.includes("#/request") ||
-        pageText.includes("billing address") || pageText.includes("purchase a service")) {
+    // Daily-request limit reached — go home and keep re-attempting (a freed slot
+    // may open). Checked at TOP LEVEL so it retries regardless of which page the
+    // message shows on.
+    if (hasAny(pageText, DETECT.daily_limit)) {
+      logToDrawer(t("d_daily_limit"));
+      track("daily_limit_hit", { step: "limit" });
+      goHomeToRetry();
+      return;
+    }
 
-      if (hasAny(pageText, DETECT.daily_limit)) {
-        logToDrawer(t("d_daily_limit"));
-        track("daily_limit_hit", { step: "service" });
-        goHomeToRetry();
-        return;
+    // ---- CIMEA request wizard (multi-step; each step has "Save and next") ----
+    if (isCimea()) {
+      // PROCESSING TIME step: pick Ordinary or Urgency per the user's setting so
+      // the Save-and-next button becomes enabled.
+      if (hasAny(pageText, DETECT.processing_time)) {
+        const picked = selectProcedure();
+        if (picked) return; // clicked a radio this tick
       }
-
+      // Advance the wizard: click "Save and next" whenever it's present + enabled.
       const saveBtn = Array.from(document.querySelectorAll("button")).find((el) => {
         const txt = (el.innerText || "").toLowerCase();
         return txt.includes("save and next") || txt.includes("salva e continua");
@@ -506,9 +566,6 @@
         setTimeout(() => { isNavigating = false; }, settle());
         return;
       }
-      // On the service page but nothing actionable yet — claim the tick and wait
-      // for the next one rather than falling through to other page handlers.
-      return;
     }
 
     // Homepage: open the most recent Draft and complete it. This claims the tick
