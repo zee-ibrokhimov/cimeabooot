@@ -12,7 +12,7 @@ var CIMEA_CONFIG = {
   //           runs. Analytics is off (nothing to send to). Use this to run the
   //           extension for yourself with no backend at all.
   // -------------------------------------------------------------------------
-  REQUIRE_LOGIN: false,
+  REQUIRE_LOGIN: true,
 
   // -------------------------------------------------------------------------
   // Your server base URL (only used when REQUIRE_LOGIN is true). Bake your URL
@@ -20,7 +20,7 @@ var CIMEA_CONFIG = {
   //   "https://cimea.yourdomain.com"
   // Derived endpoints:  <base>/api/auth/login , <base>/api/track , ...
   // -------------------------------------------------------------------------
-  DEFAULT_SERVER_BASE: "",
+  DEFAULT_SERVER_BASE: "https://cimea.zeehub.xyz",
 
   // Whether anonymous analytics is ON by default (user can toggle in popup).
   DEFAULT_ANALYTICS_CONSENT: true,
