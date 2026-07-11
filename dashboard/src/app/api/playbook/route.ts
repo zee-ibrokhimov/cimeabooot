@@ -113,6 +113,9 @@ const PLAYBOOK = {
     card_name: 'input[autocomplete="cc-name"],input[name="cardholderName"]',
     card_cvc: 'input[autocomplete="cc-csc"],input[name="cvc"],input[name="cvv"]',
     card_exp: 'input[autocomplete="cc-exp"],input[name="exp-date"],input[name="expiry"]',
+    // Session keep-alive: the icon-only "refresh token" button on the DiploMe
+    // dashboard, next to "Session expires in mm:ss". Update if CIMEA changes it.
+    session_refresh_btn: '.token-refresh button',
   },
 };
 

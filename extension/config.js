@@ -37,6 +37,12 @@ var CIMEA_CONFIG = {
   // a revoked/disabled user is stopped mid-run (not only at start).
   AUTH_RECHECK_MS: 60 * 1000,
 
+  // Auto session-refresh: click CIMEA's "refresh token" button on a RANDOM
+  // interval in this range so the login doesn't expire while you wait for the
+  // drop. Randomized (not a fixed cadence) to look less robotic.
+  SESSION_REFRESH_MIN_MS: 30 * 60 * 1000, // 30 min
+  SESSION_REFRESH_MAX_MS: 50 * 60 * 1000, // 50 min
+
   // -------------------------------------------------------------------------
   // PAGE DETECTION + DOM SELECTORS moved to the server (Layer 3). The extension
   // fetches them from <base>/api/playbook with a valid session and caches them

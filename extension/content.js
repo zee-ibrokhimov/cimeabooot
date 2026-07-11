@@ -265,6 +265,38 @@
   }, 30000);
 
   // ---------------------------------------------------------------------------
+  // Session auto-refresh — click the DiploMe dashboard's "refresh token" button
+  // (icon-only, next to "Session expires in mm:ss") on a randomized 30–50 min
+  // cadence so the CIMEA login doesn't expire while waiting for the drop. Also
+  // triggerable on demand from the popup. Gated on a loaded playbook (= a valid
+  // tool login) and only fires on the CIMEA dashboard.
+  // ---------------------------------------------------------------------------
+  let refreshTimer = null;
+  function nextRefreshDelay() {
+    const min = CFG.SESSION_REFRESH_MIN_MS || 30 * 60 * 1000;
+    const max = CFG.SESSION_REFRESH_MAX_MS || 50 * 60 * 1000;
+    return Math.floor(min + Math.random() * Math.max(0, max - min));
+  }
+  function clickSessionRefresh() {
+    if (!isCimea() || !PLAYBOOK || !SEL.session_refresh_btn) return false;
+    let btn = null;
+    try { btn = document.querySelector(SEL.session_refresh_btn); } catch (_) { return false; }
+    if (btn && btn.offsetParent !== null && !btn.disabled) {
+      btn.click();
+      if (document.getElementById("cimea-helper-drawer")) logToDrawer(t("d_session_refreshed"));
+      return true;
+    }
+    return false;
+  }
+  function scheduleAutoRefresh() {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      clickSessionRefresh();
+      scheduleAutoRefresh(); // reschedule with a fresh random delay each time
+    }, nextRefreshDelay());
+  }
+
+  // ---------------------------------------------------------------------------
   // Drawer UI
   // ---------------------------------------------------------------------------
   function injectDrawer() {
@@ -395,6 +427,21 @@
         sendResponse({ status: "success" });
       });
       return true; // async sendResponse
+    }
+
+    // Manual "Refresh CIMEA session" from the popup.
+    if (request && request.action === "refreshSession") {
+      const done = () => {
+        const ok = clickSessionRefresh();
+        if (ok) scheduleAutoRefresh(); // reset the auto timer after a manual refresh
+        sendResponse({ ok });
+      };
+      if (PLAYBOOK) done();
+      else loadPlaybook().then((loaded) => {
+        if (loaded) done();
+        else sendResponse({ ok: false, reason: "playbook" });
+      });
+      return true; // async
     }
   });
 
@@ -799,4 +846,13 @@
   // their first action by a few hundred ms instead of firing in lockstep.
   setTimeout(checkPageState, 400 + Math.floor(Math.random() * 700));
   setInterval(checkPageState, 1000); // failsafe (survives observer disconnect)
+
+  // Keep the CIMEA session alive whenever the user is logged into the tool —
+  // even before automation is started. Gated on the playbook (a valid login).
+  if (isCimea()) {
+    checkAuthorized().then((ok) => {
+      if (!ok) return;
+      loadPlaybook().then((loaded) => { if (loaded) scheduleAutoRefresh(); });
+    });
+  }
 })();

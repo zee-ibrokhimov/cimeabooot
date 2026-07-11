@@ -104,6 +104,28 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // ---- "Refresh CIMEA session" -> ask the content script to click refresh ---
+  const refreshSessionBtn = $("refreshSessionBtn");
+  if (refreshSessionBtn) {
+    refreshSessionBtn.addEventListener("click", () => {
+      const status = $("refreshStatus");
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs && tabs[0];
+        if (!tab || !/cimea-diplome\.it/.test(tab.url || "")) {
+          if (status) status.textContent = t("status_refresh_open_site");
+          return;
+        }
+        chrome.tabs.sendMessage(tab.id, { action: "refreshSession" }, (r) => {
+          void chrome.runtime.lastError;
+          if (!status) return;
+          if (r && r.ok) status.textContent = t("status_refresh_ok");
+          else if (r && r.reason === "playbook") status.textContent = t("status_refresh_login");
+          else status.textContent = t("status_refresh_none");
+        });
+      });
+    });
+  }
+
   // ---- Activate (Telegram access code) ------------------------------------
   els.loginBtn.addEventListener("click", async () => {
     const base = (els.serverBase.value || CFG.DEFAULT_SERVER_BASE || "").trim().replace(/\/+$/, "");
