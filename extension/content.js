@@ -277,11 +277,46 @@
     const max = CFG.SESSION_REFRESH_MAX_MS || 50 * 60 * 1000;
     return Math.floor(min + Math.random() * Math.max(0, max - min));
   }
+  // Rect-based visibility (unlike offsetParent, this works for position:fixed
+  // widgets like the bottom-left "Session expires in" box).
+  function refreshBtnVisible(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 2 && r.height > 2;
+  }
+  // Find the "refresh session" button with several fallbacks so it keeps working
+  // even if the exact markup shifts. Primary is the (server-tunable) playbook
+  // selector; the rest are resilient heuristics.
+  function findRefreshBtn() {
+    // 1) Playbook selector.
+    if (SEL.session_refresh_btn) {
+      try { const b = document.querySelector(SEL.session_refresh_btn); if (b) return b; } catch (_) { /* bad selector */ }
+    }
+    // 2) A button inside the session-widget container.
+    const cont = document.querySelector(".token-refresh, [class*='token-refresh']");
+    if (cont) { const b = cont.querySelector("button"); if (b) return b; }
+    // 3) A button wrapping a "refresh" icon (handles <use href> and <use xlink:href>).
+    for (const u of document.querySelectorAll("use")) {
+      const href = u.getAttribute("href") || u.getAttribute("xlink:href") || "";
+      if (/refresh/i.test(href)) { const b = u.closest("button"); if (b) return b; }
+    }
+    // 4) The button nearest the "session expires" countdown text.
+    const label = Array.from(document.querySelectorAll("span,div,p"))
+      .find((s) => /session expires|expires in|scade|scadr|истека|срок\s*сесс/i.test(s.textContent || ""));
+    if (label) {
+      let node = label;
+      for (let i = 0; i < 6 && node; i++) {
+        const b = node.querySelector && node.querySelector("button");
+        if (b) return b;
+        node = node.parentElement;
+      }
+    }
+    return null;
+  }
   function clickSessionRefresh() {
-    if (!isCimea() || !PLAYBOOK || !SEL.session_refresh_btn) return false;
-    let btn = null;
-    try { btn = document.querySelector(SEL.session_refresh_btn); } catch (_) { return false; }
-    if (btn && btn.offsetParent !== null && !btn.disabled) {
+    if (!isCimea() || !PLAYBOOK) return false;
+    const btn = findRefreshBtn();
+    if (btn && refreshBtnVisible(btn) && !btn.disabled) {
       btn.click();
       if (document.getElementById("cimea-helper-drawer")) logToDrawer(t("d_session_refreshed"));
       return true;
