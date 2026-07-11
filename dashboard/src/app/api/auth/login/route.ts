@@ -3,29 +3,24 @@ import {
   authenticate, createSession,
   isLockedOut, recordFailedLogin, clearFailedLogins,
 } from '../../../lib/auth';
+import { clientIp } from '../../../lib/net';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Trusted client IP: Vercel appends the real client IP as x-real-ip and as the
-// RIGHTMOST x-forwarded-for entry. We avoid the leftmost XFF value, which the
-// client can spoof.
-function clientIp(h: Headers): string {
-  const real = h.get('x-real-ip');
-  if (real) return real.trim();
-  const xff = h.get('x-forwarded-for');
-  if (xff) { const parts = xff.split(','); return parts[parts.length - 1].trim(); }
-  return 'unknown';
-}
-
 // POST /api/auth/login  { email, password }  -> { token, email }
 export async function POST(request: Request) {
+  // Cap the body so a huge password can't be fed straight into scrypt.
+  const raw = await request.text().catch(() => '');
+  if (raw.length > 4096) {
+    return NextResponse.json({ ok: false, error: 'payload too large' }, { status: 413 });
+  }
   let body: { email?: string; password?: string } = {};
-  try { body = await request.json(); } catch { /* ignore */ }
+  try { body = JSON.parse(raw); } catch { /* ignore */ }
 
   const email = String(body.email || '').trim().toLowerCase();
   const password = String(body.password || '');
-  if (!email || !password) {
+  if (!email || !password || password.length > 1024) {
     return NextResponse.json({ ok: false, error: 'missing credentials' }, { status: 400 });
   }
 
@@ -46,6 +41,7 @@ export async function POST(request: Request) {
     }
 
     await clearFailedLogins(emailKey);
+    await clearFailedLogins(ipKey);
     const token = await createSession(user.userId, request.headers.get('user-agent'));
     return NextResponse.json({ ok: true, token, email: user.email }, { status: 200 });
   } catch (e) {

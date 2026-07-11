@@ -27,6 +27,27 @@
   let authOk = false;           // last known authorization while running
   let lastAuthCheck = 0;        // when we last re-checked with the background
   let authChecking = false;
+  let captchaAlerted = false;   // so we alert about a CAPTCHA only once
+  let blockAlerted = false;     // so we alert about a rate-limit only once
+  let loginAlerted = false;     // so we alert about session-expiry only once
+  let failAlerted = false;      // so we alert about a failed payment only once
+
+  // Detection phrase lists live in config.js so wordings are easy to tune.
+  const DETECT = (CFG && CFG.DETECT) || {};
+  const hasAny = (text, list) => Array.isArray(list) && list.some((p) => p && text.includes(p));
+
+  // Read the page text WITHOUT the extension's own drawer — otherwise the bot's
+  // own log lines (e.g. "No availability") would match DETECT on the next tick
+  // and trap it in a self-poisoning loop. Hide/read/restore is synchronous, so
+  // there is no visible flicker.
+  function getPageText() {
+    const drawer = document.getElementById("cimea-helper-drawer");
+    let prev;
+    if (drawer) { prev = drawer.style.display; drawer.style.display = "none"; }
+    const text = (document.body.innerText || "").toLowerCase();
+    if (drawer) drawer.style.display = prev;
+    return text;
+  }
 
   // Small +/- jitter on delays so the click cadence isn't perfectly robotic —
   // this helps avoid rate-limit / anti-bot detection while staying fast.
@@ -34,6 +55,12 @@
   const settle = () => jitter(actionDelay);
   // On a server 5xx / daily-limit bounce, retry fast (but capped for sanity).
   const retryDelay = () => jitter(Math.min(actionDelay, 1500));
+  // "System busy / try again" notice: retry immediately. The reload itself is
+  // paced by page-load time, so this ~200ms floor is effectively instant; it
+  // just prevents a zero-delay tight loop. NOTE: retrying this hard against a
+  // congested server raises the odds of a temporary block — raise this value if
+  // you start getting rate-limited.
+  const busyRetryDelay = () => jitter(200);
 
   // ---------------------------------------------------------------------------
   // Safe messaging: swallow "Extension context invalidated" after a reload.
@@ -46,6 +73,11 @@
   function track(event, meta = {}) {
     safeSendMessage({ type: "track", event, meta: { ...meta, sessionId } });
   }
+  // Ask the background to show a desktop notification (works even when this tab
+  // is in the background and throttled).
+  function notify(title, body) {
+    safeSendMessage({ type: "notify", title, body });
+  }
   function newSessionId() {
     return (self.crypto && crypto.randomUUID)
       ? crypto.randomUUID()
@@ -54,10 +86,10 @@
 
   // Ask the background whether the user has a valid session. Automation is
   // blocked unless this resolves true.
-  function checkAuthorized() {
+  function checkAuthorized(live) {
     return new Promise((resolve) => {
       try {
-        chrome.runtime.sendMessage({ type: "isAuthorized" }, (r) => {
+        chrome.runtime.sendMessage({ type: live ? "verifyNow" : "isAuthorized" }, (r) => {
           void chrome.runtime.lastError;
           resolve(!!(r && r.ok));
         });
@@ -69,6 +101,29 @@
   function markAuthorized() {
     authOk = true;
     lastAuthCheck = Date.now();
+    captchaAlerted = false; // a fresh run can re-alert if a CAPTCHA reappears
+    blockAlerted = false;
+    loginAlerted = false;
+    failAlerted = false;
+    // Re-arm the cross-tab "payment succeeded elsewhere" broadcast for this run.
+    try { chrome.storage.local.set({ successAlertSent: false, paymentSucceeded: false }); } catch (_) { /* ignore */ }
+  }
+
+  // Pause automation to wait for the user (e.g. a CAPTCHA to solve) and reflect
+  // it in the drawer, without tearing down the observer — the user resumes with
+  // the drawer's Resume button once they've handled it.
+  //
+  // NOTE: this is a THIS-TAB pause only. It must NOT clear the shared
+  // automationActive flag, or it would disarm auto-resume for every other tab in
+  // a multi-tab run. The in-memory isPaused keeps this tab from acting.
+  function pauseForAlert(logKey) {
+    isPaused = true;
+    stopBeeper();
+    const btn = document.getElementById("cimea-pause-btn");
+    const dot = document.getElementById("cimea-status-indicator");
+    if (btn) btn.innerText = t("d_resume");
+    if (dot) { dot.style.background = "#ef4444"; dot.style.boxShadow = "0 0 8px #ef4444"; }
+    logToDrawer(t(logKey));
   }
 
   // Fully stop automation because the session is no longer valid.
@@ -88,7 +143,7 @@
     if (isPaused || authChecking) return;
     if (Date.now() - lastAuthCheck < CFG.AUTH_RECHECK_MS) return;
     authChecking = true;
-    checkAuthorized().then((ok) => {
+    checkAuthorized(true).then((ok) => { // live server verify, not the cached answer
       authChecking = false;
       lastAuthCheck = Date.now();
       if (!ok) hardStopAuth();
@@ -296,6 +351,28 @@
     }
   });
 
+  // Count a retry attempt (for the popup's stats) and record it.
+  function bumpRetries(step) {
+    chrome.storage.local.get(["totalRetries"], (r) => {
+      const total = (r.totalRetries || 0) + 1;
+      chrome.storage.local.set({ totalRetries: total });
+      track("save_next_clicked", { step, retries: total });
+    });
+  }
+
+  // Navigate back to the homepage to keep hunting (daily-limit / no-availability).
+  function goHomeToRetry() {
+    isNavigating = true;
+    const home = Array.from(document.querySelectorAll("a,div,span,li")).find((el) => {
+      const txt = (el.innerText || "").trim().toLowerCase();
+      return txt === "homepage" || txt === "home";
+    });
+    if (home) home.click();
+    else if (isCimea()) location.hash = "#/";
+    else location.reload();
+    setTimeout(() => { isNavigating = false; }, settle());
+  }
+
   // ---------------------------------------------------------------------------
   // Main state machine (throttled)
   // ---------------------------------------------------------------------------
@@ -305,15 +382,104 @@
     // revoked/disabled user is stopped mid-run (not just at start).
     maybeRecheckAuth();
     if (!authOk) return;
-    const pageText = (document.body.innerText || "").toLowerCase();
+    const pageText = getPageText();
     const hash = location.hash.toLowerCase();
 
-    // Server crash recovery
-    if (/(502 bad gateway|504 gateway time-out|503 service unavailable|service unavailable|internal server error)/.test(pageText)) {
+    // CAPTCHA — STOP (reloading wipes it) and alert. Match ONLY the active
+    // challenge popup (reCAPTCHA 'bframe' / hCaptcha challenge), which is hidden
+    // until a challenge fires — NOT the always-present 'anchor' checkbox widget,
+    // which would false-pause on any page that merely loads reCAPTCHA.
+    const captchaEl = Array.from(document.querySelectorAll("iframe")).find((f) => {
+      if (!/recaptcha\/api2\/bframe|hcaptcha\.com\/(?:challenge|1\/)/i.test(f.src || "")) return false;
+      const r = f.getBoundingClientRect();
+      return f.offsetParent !== null && r.width > 10 && r.height > 10;
+    });
+    if (captchaEl || hasAny(pageText, DETECT.captcha_text)) {
+      if (!captchaAlerted) {
+        captchaAlerted = true;
+        playSound();
+        notify(t("notif_captcha_title"), t("notif_captcha_body"));
+        track("error", { errorType: "captcha" });
+      }
+      pauseForAlert("d_captcha");
+      return;
+    }
+
+    // Session expired / login page — pause and alert so you can log back in
+    // (the extension never stores your CIMEA password). Detect only via the
+    // login route or specific "session expired / please log in" wording — NOT a
+    // stray password field or a "Login" nav button, which would false-pause.
+    const onLoginPage = hash.includes("#/login") || hash.includes("#/signin");
+    if (onLoginPage || hasAny(pageText, DETECT.login_required)) {
+      if (!loginAlerted) {
+        loginAlerted = true;
+        playSound();
+        notify(t("notif_login_title"), t("notif_login_body"));
+        track("error", { errorType: "session_expired" });
+      }
+      pauseForAlert("d_login");
+      return;
+    }
+
+    // Rate-limited / blocked — back off (~45s) instead of hammering.
+    if (hasAny(pageText, DETECT.blocked)) {
+      if (!blockAlerted) {
+        blockAlerted = true;
+        playSound();
+        notify(t("notif_blocked_title"), t("notif_blocked_body"));
+        track("error", { errorType: "rate_limited" });
+      }
+      logToDrawer(t("d_blocked"));
+      isNavigating = true;
+      setTimeout(() => { isNavigating = false; blockAlerted = false; location.reload(); }, jitter(45000));
+      return;
+    }
+
+    // Maintenance page — wait ~30s and retry.
+    if (hasAny(pageText, DETECT.maintenance)) {
+      logToDrawer(t("d_maintenance"));
+      track("error", { errorType: "maintenance" });
+      isNavigating = true;
+      setTimeout(() => { isNavigating = false; location.reload(); }, jitter(30000));
+      return;
+    }
+
+    // Server 5xx — reload.
+    if (hasAny(pageText, DETECT.server_error)) {
       logToDrawer(t("d_server_error"));
       track("server_crash_detected", { errorType: "server_5xx" });
       isNavigating = true;
-      setTimeout(() => location.reload(), retryDelay());
+      setTimeout(() => { isNavigating = false; location.reload(); }, retryDelay());
+      return;
+    }
+
+    // "System busy — try again" congestion notice — retry immediately.
+    if (hasAny(pageText, DETECT.busy)) {
+      logToDrawer(t("d_system_busy"));
+      bumpRetries("busy_retry");
+      isNavigating = true;
+      setTimeout(() => { isNavigating = false; location.reload(); }, busyRetryDelay());
+      return;
+    }
+
+    // No availability — go back and keep hunting.
+    if (hasAny(pageText, DETECT.no_availability)) {
+      logToDrawer(t("d_no_slots"));
+      bumpRetries("no_availability");
+      goHomeToRetry();
+      return;
+    }
+
+    // Payment failed / declined — ONLY on the payment gateway (not the CIMEA
+    // request list, where a prior request's "failed" status would false-pause).
+    if (isNexi() && hasAny(pageText, DETECT.payment_failed)) {
+      if (!failAlerted) {
+        failAlerted = true;
+        playSound();
+        notify(t("notif_fail_title"), t("notif_fail_body"));
+        track("error", { errorType: "payment_failed" });
+      }
+      pauseForAlert("d_payment_failed");
       return;
     }
 
@@ -321,40 +487,37 @@
     if (hash.includes("#/service") || hash.includes("#/request") ||
         pageText.includes("billing address") || pageText.includes("purchase a service")) {
 
-      if (/the maximum limit of daily requests has been reached|il limite massimo di richieste giornaliere/.test(pageText)) {
+      if (hasAny(pageText, DETECT.daily_limit)) {
         logToDrawer(t("d_daily_limit"));
         track("daily_limit_hit", { step: "service" });
-        isNavigating = true;
-        const home = Array.from(document.querySelectorAll("a,div,span,li")).find((el) => {
-          const t = (el.innerText || "").trim().toLowerCase();
-          return t === "homepage" || t === "home";
-        });
-        if (home) home.click(); else location.hash = "#/";
-        setTimeout(() => { isNavigating = false; }, settle());
+        goHomeToRetry();
         return;
       }
 
       const saveBtn = Array.from(document.querySelectorAll("button")).find((el) => {
-        const t = (el.innerText || "").toLowerCase();
-        return t.includes("save and next") || t.includes("salva e continua");
+        const txt = (el.innerText || "").toLowerCase();
+        return txt.includes("save and next") || txt.includes("salva e continua");
       });
       if (saveBtn && !saveBtn.disabled && saveBtn.offsetParent !== null) {
         logToDrawer(t("d_clicking_savenext"));
         isNavigating = true;
         saveBtn.click();
-        chrome.storage.local.get(["totalRetries"], (r) => {
-          const total = (r.totalRetries || 0) + 1;
-          chrome.storage.local.set({ totalRetries: total });
-          track("save_next_clicked", { step: "payment_page", retries: total });
-        });
+        bumpRetries("payment_page");
         setTimeout(() => { isNavigating = false; }, settle());
         return;
       }
+      // On the service page but nothing actionable yet — claim the tick and wait
+      // for the next one rather than falling through to other page handlers.
+      return;
     }
 
-    // Homepage: open the most recent Draft and complete it
-    if (hash === "#/" || hash.includes("#/home") || pageText.includes("my requests")) {
+    // Homepage: open the most recent Draft and complete it. This claims the tick
+    // (return) so the success/nexi handlers below never run on the request list —
+    // where a prior request's status text could otherwise be misread.
+    if (hash === "#/" || hash.includes("#/home") ||
+        (pageText.includes("my requests") && !hash.includes("#/service") && !hash.includes("#/request"))) {
       handleDraftFlow();
+      return;
     }
 
     // Auto-fill card details (LOCAL ONLY) — ONLY on the Nexi payment gateway.
@@ -365,6 +528,8 @@
     // Nexi payment gateway: alert the user
     if (isNexi() && !nexiBeeper) {
       track("payment_page_reached", { step: "nexi" });
+      notify(t("notif_pay_title"), t("notif_pay_body"));
+      safeSendMessage({ type: "focusTab" }); // bring this tab to the front
       logToDrawer(t("d_nexi_page"));
       nexiBeeper = setInterval(() => {
         if (isPaused) return; // respect pause; stopBeeper() also clears it
@@ -376,24 +541,31 @@
     }
 
     // Success detection
-    if (/payment successful|pagamento riuscito|payment completed/.test(pageText)) {
+    if (hasAny(pageText, DETECT.success)) {
       chrome.storage.local.get(["soundAlert", "successAlertSent"], (r) => {
         if (r.soundAlert !== false) playSound();
-        if (!r.successAlertSent) {
-          safeSendMessage({ type: "notifyTelegram", text: "🎉 CIMEA payment was SUCCESSFUL!" });
+        if (!r.successAlertSent) { // fire alerts/analytics exactly once per run
           chrome.storage.local.set({
             successAlertSent: true, paymentSucceeded: true, automationActive: false
           });
+          track("payment_success", {
+            step: "success",
+            durationMs: runStartedAt ? Date.now() - runStartedAt : null
+          });
+          notify(t("notif_success_title"), t("notif_success_body"));
+          logToDrawer(t("d_success"));
         }
       });
-      track("payment_success", {
-        step: "success",
-        durationMs: runStartedAt ? Date.now() - runStartedAt : null
-      });
-      logToDrawer(t("d_success"));
+      // Reflect the stopped state in the drawer so the button reads Resume (not a
+      // mislabeled Pause that would misroute the next click).
+      const sbtn = document.getElementById("cimea-pause-btn");
+      const sdot = document.getElementById("cimea-status-indicator");
+      if (sbtn) sbtn.innerText = t("d_resume");
+      if (sdot) { sdot.style.background = "#ef4444"; sdot.style.boxShadow = "0 0 8px #ef4444"; }
       isPaused = true;
       stopBeeper();
       stopObserver();
+      return;
     }
   }
 
@@ -525,6 +697,8 @@
     observerActive = false;
   }
   startObserver();
-  setTimeout(checkPageState, 500);
+  // Randomize the first check a little so multiple tabs launched together stagger
+  // their first action by a few hundred ms instead of firing in lockstep.
+  setTimeout(checkPageState, 400 + Math.floor(Math.random() * 700));
   setInterval(checkPageState, 1000); // failsafe (survives observer disconnect)
 })();

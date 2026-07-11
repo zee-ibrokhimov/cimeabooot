@@ -23,15 +23,24 @@ export default async function UsersPage() {
     await ensureAuthTables();
     const { rows } = await sql`
       SELECT
-        u.id, u.email, u.active, u.expires_at, u.created_at,
-        MAX(CASE WHEN l.event_type = 'payment_page_reached' THEN l.created_at END) AS last_payment_page,
-        COUNT(*) FILTER (WHERE l.event_type = 'payment_page_reached')::int AS payment_page_count,
-        COUNT(*) FILTER (WHERE l.event_type = 'payment_success')::int      AS success_count,
-        MAX(s.last_seen_at) AS last_seen
+        u.id, u.email, u.telegram_username, (u.bound_client_id IS NOT NULL) AS device_bound,
+        u.active, u.expires_at, u.created_at,
+        ul.last_payment_page, ul.payment_page_count, ul.success_count,
+        ul.distinct_ips_7d, ul.distinct_countries_7d,
+        s.last_seen
       FROM users u
-      LEFT JOIN usage_logs l ON l.user_id = u.id
-      LEFT JOIN sessions s   ON s.user_id = u.id
-      GROUP BY u.id
+      LEFT JOIN (
+        SELECT user_id,
+          MAX(CASE WHEN event_type = 'payment_page_reached' THEN created_at END) AS last_payment_page,
+          COUNT(*) FILTER (WHERE event_type = 'payment_page_reached')::int AS payment_page_count,
+          COUNT(*) FILTER (WHERE event_type = 'payment_success')::int      AS success_count,
+          COUNT(DISTINCT ip_hash) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS distinct_ips_7d,
+          COUNT(DISTINCT country) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS distinct_countries_7d
+        FROM usage_logs GROUP BY user_id
+      ) ul ON ul.user_id = u.id
+      LEFT JOIN (
+        SELECT user_id, MAX(last_seen_at) AS last_seen FROM sessions GROUP BY user_id
+      ) s ON s.user_id = u.id
       ORDER BY u.created_at DESC
     `;
     users = rows as unknown as AdminUser[];

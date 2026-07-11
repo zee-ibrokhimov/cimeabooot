@@ -44,14 +44,14 @@ The **server** additionally derives, from the network request (not the client bo
 
 ## Authentication data
 
-- The login **password** is sent to your server only to log in and is **never stored** by the extension.
-- The **session token** is kept in `chrome.storage.session` — it is not written to disk and is not readable by the CIMEA/Nexi page context (content scripts can't access it). It is cleared on logout, on browser restart, on server revocation, and by server-side session expiry (30-day absolute / 7-day idle).
-- Server-side: passwords are stored as scrypt hashes; only the **SHA-256 hash** of a session token is stored (a DB leak yields no usable tokens).
+- The **access code** (issued by your Telegram bot) is the user's credential. It's stored in `chrome.storage.local` so it survives restarts and is exchanged for a rotating session; it is **device-bound** server-side.
+- The **session token** is kept in `chrome.storage.session` — not written to disk and not readable by the CIMEA/Nexi page context (content scripts can't access it). It's cleared on logout, browser restart, server revocation, and session expiry (30-day absolute / 7-day idle).
+- Server-side: only the **SHA-256 hash** of the access code and of each session token is stored (a DB leak yields no usable codes/tokens). The Telegram bot token lives only in server env.
 
 ## Third-party contact
 
-- Your own Vercel endpoint (analytics) — opt-in.
-- `api.telegram.org` — only if you configure a Telegram bot, for your own alerts.
+- Your own server (login + analytics) — analytics is opt-in.
+- `api.telegram.org` — server-side only, for the access-code bot.
 - The CIMEA and Nexi sites themselves — that's where automation runs.
 
 The original extension's `freeipapi.com` lookup and its hard-coded author tracking URL have been removed.

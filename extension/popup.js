@@ -5,8 +5,7 @@
 // logged into the server. The password is sent to the server for login and is
 // never stored; only the returned session token is kept (by the background).
 //
-// Sensitive fields (card + Telegram token) are saved to chrome.storage.local
-// and never leave the device.
+// Card fields are saved to chrome.storage.local and never leave the device.
 // =============================================================================
 document.addEventListener("DOMContentLoaded", () => {
   const CFG = (typeof CIMEA_CONFIG !== "undefined") ? CIMEA_CONFIG : {};
@@ -15,8 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const els = {
     // auth
     serverBase: $("serverBase"),
-    loginEmail: $("loginEmail"),
-    loginPassword: $("loginPassword"),
+    accessCode: $("accessCode"),
     loginBtn: $("loginBtn"),
     loginStatus: $("loginStatus"),
     loginView: $("login-view"),
@@ -25,14 +23,13 @@ document.addEventListener("DOMContentLoaded", () => {
     logoutBtn: $("logoutBtn"),
     tool: $("tool"),
     // settings
-    autoFill: $("autoFillToggle"),
     fastNav: $("fastNavToggle"),
     autoRetry: $("autoRetryToggle"),
     soundAlert: $("soundAlertToggle"),
+    fastLoad: $("fastLoadToggle"),
     speed: $("speedController"),
+    tabCount: $("tabCount"),
     analyticsConsent: $("analyticsConsentToggle"),
-    tgToken: $("tgToken"),
-    tgChatId: $("tgChatId"),
     cardName: $("cardName"),
     cardNum: $("cardNum"),
     cardExp: $("cardExp"),
@@ -78,30 +75,39 @@ document.addEventListener("DOMContentLoaded", () => {
   chrome.storage.local.get(["lang"], (s) => applyLang(s.lang || currentLang));
 
   // ---- Auth view state ----------------------------------------------------
-  function showLoggedIn(email) {
+  function showLoggedIn() {
     els.loginView.style.display = "none";
     els.accountView.style.display = "block";
     els.tool.style.display = "block";
-    els.accountEmail.textContent = email || "";
+    els.accountEmail.textContent = t("account_activated");
   }
   function showLoggedOut() {
     els.loginView.style.display = "block";
     els.accountView.style.display = "none";
     els.tool.style.display = "none";
   }
+  // Standalone/personal mode: no server, no login — just show the tool.
+  function showStandalone() {
+    const auth = document.getElementById("auth-section");
+    if (auth) auth.style.display = "none";
+    els.tool.style.display = "block";
+    const sub = document.querySelector(".subtitle");
+    if (sub) sub.textContent = t("subtitle_standalone");
+  }
 
   send({ type: "authStatus" }).then((s) => {
     els.serverBase.value = s.serverBase || CFG.DEFAULT_SERVER_BASE || "";
-    if (s.loggedIn) showLoggedIn(s.email); else showLoggedOut();
+    if (s.requireLogin === false) showStandalone();
+    else if (s.loggedIn) showLoggedIn();
+    else showLoggedOut();
   });
 
-  // ---- Login --------------------------------------------------------------
+  // ---- Activate (Telegram access code) ------------------------------------
   els.loginBtn.addEventListener("click", async () => {
     const base = (els.serverBase.value || "").trim().replace(/\/+$/, "");
-    const email = els.loginEmail.value.trim();
-    const password = els.loginPassword.value;
+    const code = els.accessCode.value.trim();
     if (!base) { els.loginStatus.textContent = t("status_enter_server"); return; }
-    if (!email || !password) { els.loginStatus.textContent = t("status_enter_creds"); return; }
+    if (!code) { els.loginStatus.textContent = t("status_enter_code"); return; }
 
     let origin;
     try { origin = new URL(base).origin + "/*"; }
@@ -116,20 +122,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!granted) { els.loginStatus.textContent = t("status_allow_domain"); return; }
 
     els.loginBtn.disabled = true;
-    els.loginStatus.textContent = t("status_signing_in");
-    const r = await send({ type: "authLogin", email, password });
+    els.loginStatus.textContent = t("status_activating");
+    const r = await send({ type: "authActivate", code });
     els.loginBtn.disabled = false;
-    els.loginPassword.value = "";
     if (r.ok) {
       els.loginStatus.textContent = "";
-      showLoggedIn(r.email || email);
+      els.accessCode.value = "";
+      showLoggedIn();
     } else {
       const err = String(r.error || "");
       els.loginStatus.textContent =
         err === "no_server" ? t("status_set_server")
         : err === "network" ? t("status_network")
         : /too many/i.test(err) ? t("status_too_many")
-        : t("status_login_failed");
+        : err === "bound" ? t("status_bound")
+        : t("status_code_invalid");
     }
   });
 
@@ -140,21 +147,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ---- Settings load ------------------------------------------------------
   const STORAGE_KEYS = [
-    "autoFill", "fastNav", "autoRetry", "soundAlert", "speed",
+    "fastNav", "autoRetry", "soundAlert", "fastLoad", "speed", "tabCount",
     "analyticsConsent",
-    "tgToken", "tgChatId",
     "cardName", "cardNum", "cardExp", "cardCvc",
     "totalRetries"
   ];
   chrome.storage.local.get(STORAGE_KEYS, (s) => {
-    els.autoFill.checked = s.autoFill !== false;
     els.fastNav.checked = s.fastNav !== false;
     els.autoRetry.checked = s.autoRetry !== false;
     els.soundAlert.checked = s.soundAlert !== false;
+    els.fastLoad.checked = s.fastLoad !== false;
     els.speed.value = s.speed || "1000";
+    els.tabCount.value = s.tabCount || "3";
     els.analyticsConsent.checked = s.analyticsConsent !== false;
-    els.tgToken.value = s.tgToken || "";
-    els.tgChatId.value = s.tgChatId || "";
     els.cardName.value = s.cardName || "";
     els.cardNum.value = s.cardNum || "";
     els.cardExp.value = s.cardExp || "";
@@ -171,14 +176,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // ---- Persist on change --------------------------------------------------
   function persist() {
     chrome.storage.local.set({
-      autoFill: els.autoFill.checked,
       fastNav: els.fastNav.checked,
       autoRetry: els.autoRetry.checked,
       soundAlert: els.soundAlert.checked,
+      fastLoad: els.fastLoad.checked,
       speed: els.speed.value,
+      tabCount: els.tabCount.value,
       analyticsConsent: els.analyticsConsent.checked,
-      tgToken: els.tgToken.value.trim(),
-      tgChatId: els.tgChatId.value.trim(),
       cardName: els.cardName.value.trim(),
       cardNum: els.cardNum.value.replace(/\s+/g, ""),
       cardExp: els.cardExp.value.trim(),
@@ -186,29 +190,18 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   [
-    els.autoFill, els.fastNav, els.autoRetry, els.soundAlert, els.speed,
-    els.analyticsConsent, els.tgToken, els.tgChatId,
+    els.fastNav, els.autoRetry, els.soundAlert, els.fastLoad, els.speed, els.tabCount,
+    els.analyticsConsent,
     els.cardName, els.cardNum, els.cardExp, els.cardCvc
   ].forEach((el) => {
     el.addEventListener("change", persist);
     if (el.tagName === "INPUT" && el.type !== "checkbox") el.addEventListener("blur", persist);
   });
 
-  // ---- Telegram test ------------------------------------------------------
+  // ---- Persist the server URL on blur -------------------------------------
   els.serverBase.addEventListener("blur", () => {
     const base = (els.serverBase.value || "").trim().replace(/\/+$/, "");
     if (base) chrome.storage.local.set({ serverBase: base });
-  });
-
-  $("testTgBtn").addEventListener("click", () => {
-    const btn = $("testTgBtn");
-    const token = els.tgToken.value.trim();
-    const chatId = els.tgChatId.value.trim();
-    if (!token || !chatId) { flash(btn, t("flash_enter_tg")); return; }
-    persist();
-    rememberOriginal(btn);
-    btn.textContent = t("flash_sending");
-    send({ type: "testTelegram", token, chatId }).then((r) => flash(btn, r && r.ok ? t("flash_sent") : t("flash_failed")));
   });
 
   // ---- Wipe card data -----------------------------------------------------
@@ -228,7 +221,6 @@ document.addEventListener("DOMContentLoaded", () => {
       chrome.tabs.sendMessage(tabs[0].id, {
         action: "startAutomation",
         settings: {
-          autoFill: els.autoFill.checked,
           fastNav: els.fastNav.checked,
           autoRetry: els.autoRetry.checked,
           soundAlert: els.soundAlert.checked
@@ -238,6 +230,46 @@ document.addEventListener("DOMContentLoaded", () => {
         else if (resp && resp.status === "unauthorized") flash(btn, t("flash_session_expired"));
         else flash(btn, t("flash_active"));
       });
+    });
+  });
+
+  // ---- Multi-tab launcher -------------------------------------------------
+  // Clones the current CIMEA tab N times, opening each ~300ms apart (plus a
+  // little jitter) so their automation starts are staggered. Each new tab
+  // auto-starts on load because automationActive is set. Runs on the user's own
+  // machine / single session — no proxies, no scaling.
+  $("launchTabsBtn").addEventListener("click", () => {
+    const btn = $("launchTabsBtn");
+    const n = Math.max(2, Math.min(5, parseInt(els.tabCount.value, 10) || 3));
+    persist();
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const cur = tabs[0];
+      if (!cur || !/cimea-diplome\.it/.test(cur.url || "")) {
+        flash(btn, t("flash_open_site"));
+        return;
+      }
+      // Gate on a valid session before arming the shared auto-start flag, same
+      // as the Start / Resume paths.
+      const auth = await send({ type: "isAuthorized" });
+      if (!auth.ok) { flash(btn, t("flash_session_expired")); return; }
+      // Arm auto-start so freshly-opened tabs begin on load.
+      chrome.storage.local.set({ automationActive: true });
+      // Start the current tab immediately.
+      chrome.tabs.sendMessage(cur.id, {
+        action: "startAutomation",
+        settings: {
+          fastNav: els.fastNav.checked,
+          autoRetry: els.autoRetry.checked,
+          soundAlert: els.soundAlert.checked
+        }
+      }, () => { void chrome.runtime.lastError; });
+      // Open the rest in the background, synchronously (so they all open even if
+      // the popup closes). Each tab jitters its own first action, so their starts
+      // are still staggered by a few hundred ms.
+      for (let i = 1; i < n; i++) {
+        try { chrome.tabs.create({ url: cur.url, active: false }); } catch (_) { /* ignore */ }
+      }
+      flash(btn, t("flash_launched"));
     });
   });
 

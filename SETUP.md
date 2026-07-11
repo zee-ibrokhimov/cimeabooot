@@ -18,13 +18,23 @@ The `users`, `sessions`, and `usage_logs` tables are created automatically on fi
 
 > Reaching your home server from users' browsers requires a public HTTPS URL — a domain pointing at your IP with port-forwarding, or (simplest for a home server) a **Cloudflare Tunnel** to the Coolify app. Cloudflare also fills in visitor country (`cf-ipcountry`).
 
-## 2. Create user accounts (owner)
+## 2. Set up the Telegram access-code bot (owner)
 
-1. Open `https://<your-app>.vercel.app/dashboard` and unlock with your `ADMIN_TOKEN`.
-2. Go to **Users** and create an account (email + a temporary password, min 10 chars) for each person.
-3. From the same page you can **disable**, **reset password**, or **delete** users, and see **who reached the payment page** and when. Disabling a user or resetting their password revokes their sessions immediately.
+Users get in by pasting a one-time **access code** the bot issues after you approve them.
 
-Sessions expire after 30 days (or 7 days idle), and users must log in again after a browser restart (the token is kept in session storage, never written to disk). A disabled user is stopped mid-run within ~1 minute.
+1. In Telegram, create a bot with **@BotFather** and copy its **token**.
+2. Get your own numeric Telegram id (message **@userinfobot**).
+3. In Coolify env, set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_CHAT_ID` (your id), and `TELEGRAM_WEBHOOK_SECRET` (any random string). Redeploy.
+4. Register the webhook once:
+   ```
+   curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<your-domain>/api/telegram/webhook&secret_token=<SECRET>"
+   ```
+
+**How access works:**
+- A user opens your bot, taps **Start → Request access**.
+- You get an **Approve / Deny** message. Tap **Approve** → the bot DMs them a code like `K7QW-9F3M-2XTP`.
+- They paste it into the extension and press **Activate**. The code is **device-bound** (works on one browser).
+- In `/dashboard/users` you see everyone, **who reached the payment page**, a **Sharing (7d)** flag (⚠ if a code shows up from many IPs/countries), and buttons to **Disable**, **Reset device** (let them re-activate on a new device), or **Delete**. Disabling revokes sessions immediately; a disabled user is stopped mid-run within ~1 minute.
 
 ## 3. Configure + distribute the extension
 
@@ -32,12 +42,12 @@ Sessions expire after 30 days (or 7 days idle), and users must log in again afte
 2. (Optional) Add `"https://<your-app>.vercel.app/*"` to `host_permissions` in `extension/manifest.json` so users aren't prompted to grant it. Otherwise the extension requests it at login (users click **Allow**).
 3. Give users the `extension/` folder (or the zip). They load it via `chrome://extensions` → Developer mode → **Load unpacked**.
 
-## 4. Users sign in and run it
+## 4. Users activate and run it
 
-1. Users open the popup and **log in** with the email + password you gave them. The password is sent to your server for login only and is **never stored**; the extension keeps just a session token.
+1. Users open the popup and paste the **access code** from the Telegram bot, then press **Activate**. The code is stored locally so they enter it once; the extension exchanges it for a rotating session behind the scenes.
 2. They open the CIMEA portal and log into CIMEA themselves (the extension never handles the CIMEA password).
-3. They click **Start Automation** — the bot works to grab a slot and drive to the payment page. Nothing runs, and no analytics is sent, unless the session is valid. Disabling a user or resetting their password signs them out everywhere.
-4. Optional card + Telegram details stay on the user's device (see PRIVACY.md).
+3. They click **Start Automation** — the bot works to grab a slot and drive to the payment page. Nothing runs, and no analytics is sent, unless the code is valid and active. Disabling a user or resetting their device stops them (mid-run within ~1 minute).
+4. Optional card details stay on the user's device (see PRIVACY.md).
 
 ## Notes & cautions
 

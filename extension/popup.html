@@ -22,12 +22,11 @@
     <!-- ACCOUNT / LOGIN -->
     <section id="auth-section">
       <div id="login-view" class="panel">
-        <div class="section-title" style="margin-top:0" data-i18n="signin_title">🔒 Sign in</div>
+        <div class="section-title" style="margin-top:0" data-i18n="signin_title">🔑 Activate</div>
         <div class="input-group">
           <input type="url" id="serverBase" data-i18n-ph="ph_server" placeholder="Server URL (https://…)" autocomplete="off" />
-          <input type="email" id="loginEmail" data-i18n-ph="ph_email" placeholder="Email" autocomplete="username" />
-          <input type="password" id="loginPassword" data-i18n-ph="ph_password" placeholder="Password" autocomplete="current-password" />
-          <button id="loginBtn" class="primary-btn"><span class="btn-icon">→</span> <span data-i18n="login_btn">Log in</span></button>
+          <input type="text" id="accessCode" data-i18n-ph="ph_code" placeholder="Access code (from the Telegram bot)" autocomplete="off" spellcheck="false" />
+          <button id="loginBtn" class="primary-btn"><span class="btn-icon">→</span> <span data-i18n="login_btn">Activate</span></button>
           <span id="loginStatus" class="hint"></span>
         </div>
       </div>
@@ -46,13 +45,6 @@
     <!-- AUTOMATION -->
     <main id="tool" class="main-content">
       <div class="settings-group">
-        <div class="setting-item">
-          <div class="setting-info">
-            <span class="setting-label" data-i18n="s_autofill_label">Auto-fill Documents</span>
-            <span class="setting-desc" data-i18n="s_autofill_desc">Highlight and fill standard form inputs.</span>
-          </div>
-          <label class="switch"><input type="checkbox" id="autoFillToggle" /><span class="slider round"></span></label>
-        </div>
         <div class="setting-item">
           <div class="setting-info">
             <span class="setting-label" data-i18n="s_fastnav_label">Fast Navigation</span>
@@ -74,6 +66,13 @@
           </div>
           <label class="switch"><input type="checkbox" id="soundAlertToggle" /><span class="slider round"></span></label>
         </div>
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label" data-i18n="s_fastload_label">Fast Load</span>
+            <span class="setting-desc" data-i18n="s_fastload_desc">Skip images/fonts on CIMEA so reloads are faster.</span>
+          </div>
+          <label class="switch"><input type="checkbox" id="fastLoadToggle" /><span class="slider round"></span></label>
+        </div>
         <div class="setting-item column">
           <div class="setting-info full">
             <span class="setting-label" data-i18n="s_speed_label">Automation Speed</span>
@@ -93,7 +92,7 @@
         <div class="setting-item plain">
           <div class="setting-info">
             <span class="setting-label" data-i18n="analytics_share_label">Share usage statistics</span>
-            <span class="setting-desc" data-i18n="analytics_share_desc">Sent to your server. Never card or Telegram data.</span>
+            <span class="setting-desc" data-i18n="analytics_share_desc">Sent to your server. Never your card details.</span>
           </div>
           <label class="switch"><input type="checkbox" id="analyticsConsentToggle" /><span class="slider round"></span></label>
         </div>
@@ -101,13 +100,6 @@
           <div class="stat-item"><span class="stat-value" id="stat-retries">0</span><span class="stat-label" data-i18n="stat_retries">Total Retries</span></div>
           <div class="stat-item"><span class="stat-value" id="stat-time">0m</span><span class="stat-label" data-i18n="stat_time">Time Saved</span></div>
         </div>
-      </div>
-
-      <div class="section-title" data-i18n="tg_title">📱 Telegram Notifications</div>
-      <div class="input-group">
-        <input type="text" id="tgToken" data-i18n-ph="ph_tg_token" placeholder="Bot Token (e.g. 123:ABC...)" autocomplete="off" />
-        <input type="text" id="tgChatId" data-i18n-ph="ph_tg_chat" placeholder="Chat ID (e.g. 12345678)" autocomplete="off" />
-        <button id="testTgBtn" class="secondary-btn" data-i18n="tg_test_btn">Send Test Message</button>
       </div>
 
       <div class="section-title"><span data-i18n="card_title">💳 Auto-Fill Card</span> <span class="badge-local" data-i18n="card_badge">100% LOCAL</span></div>
@@ -121,6 +113,20 @@
             <input type="text" id="cardCvc" data-i18n-ph="ph_card_cvc" placeholder="CVC" inputmode="numeric" autocomplete="off" />
           </div>
           <button id="clearCardBtn" class="danger-btn" data-i18n="card_wipe_btn">Wipe Card Data</button>
+        </div>
+      </div>
+
+      <div class="section-title" data-i18n="multitab_title">🗂️ Multi-Tab</div>
+      <div class="panel">
+        <p class="hint" data-i18n="multitab_desc">Open several tabs at once, each started a few ms apart — more shots at a freed slot.</p>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:10px;">
+          <select id="tabCount" class="field" style="width:80px;">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+          <button id="launchTabsBtn" class="secondary-btn" style="margin:0;" data-i18n="multitab_launch">Open tabs &amp; start</button>
         </div>
       </div>
 

@@ -14,6 +14,19 @@ import { Pool, type QueryResultRow } from 'pg';
 // Reuse a single pool across hot-reloads / requests.
 const globalForPg = globalThis as unknown as { _cimeaPool?: Pool };
 
+// TLS to Postgres:
+//   DATABASE_SSL unset/false -> no TLS (fine on a trusted private network).
+//   DATABASE_SSL=true        -> TLS WITH certificate verification (secure).
+//                               Provide DATABASE_CA_CERT for a self-signed / internal CA.
+//   DATABASE_SSL_INSECURE=true-> TLS without verification (last resort only).
+function dbSsl(): false | { rejectUnauthorized: boolean; ca?: string } {
+  if (process.env.DATABASE_SSL_INSECURE === 'true') return { rejectUnauthorized: false };
+  if (process.env.DATABASE_SSL === 'true') {
+    return { rejectUnauthorized: true, ca: process.env.DATABASE_CA_CERT || undefined };
+  }
+  return false;
+}
+
 function pool(): Pool {
   if (!globalForPg._cimeaPool) {
     const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
@@ -22,9 +35,7 @@ function pool(): Pool {
     }
     globalForPg._cimeaPool = new Pool({
       connectionString,
-      // Set DATABASE_SSL=true if your Postgres requires TLS (many self-hosted
-      // instances on the same private network do not).
-      ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+      ssl: dbSsl(),
       max: Number(process.env.DATABASE_POOL_MAX || 5),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,

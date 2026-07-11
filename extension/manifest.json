@@ -5,15 +5,18 @@
   "description": "Automates form filling, navigation and payment retries on the CIMEA portal. Card data stays 100% local; only anonymous usage stats are shared (opt-in, to your own endpoint).",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "CIMEA Helper Pro"
+    "default_title": "CIMEA Helper Pro",
+    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
   },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
   "permissions": [
-    "storage"
+    "storage",
+    "declarativeNetRequest",
+    "notifications"
   ],
   "host_permissions": [
     "https://*.cimea-diplome.it/*",
-    "https://ecommerce.nexi.it/*",
-    "https://api.telegram.org/*"
+    "https://*.nexi.it/*"
   ],
   "optional_host_permissions": [
     "https://*/*"
@@ -25,7 +28,7 @@
     {
       "matches": [
         "https://*.cimea-diplome.it/*",
-        "https://ecommerce.nexi.it/*"
+        "https://*.nexi.it/*"
       ],
       "js": ["config.js", "i18n.js", "content.js"],
       "run_at": "document_end",

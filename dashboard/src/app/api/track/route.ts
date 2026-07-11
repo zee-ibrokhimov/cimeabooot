@@ -2,6 +2,7 @@ import { sql } from '../../lib/db';
 import { NextResponse } from 'next/server';
 import { sanitizeEvent, hashIp, checkAdminToken } from '../../lib/analytics';
 import { verifySession, bearer } from '../../lib/auth';
+import { clientIp } from '../../lib/net';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,9 +51,6 @@ function rateLimited(key: string): boolean {
   return rec.count > RATE_MAX;
 }
 
-function clientIp(h: Headers): string | null {
-  return h.get('x-forwarded-for')?.split(',')[0].trim() || h.get('x-real-ip') || null;
-}
 
 // -----------------------------------------------------------------------------
 // POST /api/track  — receive one event from a logged-in user's extension.

@@ -11,17 +11,20 @@ import crypto from 'crypto';
 import { sql } from './db';
 
 const SCRYPT_KEYLEN = 64;
+// Stronger scrypt cost than the Node default (N=16384); maxmem is raised to fit.
+// hash and verify MUST use identical options.
+const SCRYPT_OPTS = { N: 32768, r: 8, p: 1, maxmem: 96 * 1024 * 1024 };
 
 // ---- password hashing -------------------------------------------------------
 export function hashPassword(password: string): { salt: string; hash: string } {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN).toString('hex');
+  const hash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_OPTS).toString('hex');
   return { salt, hash };
 }
 
 export function verifyPassword(password: string, salt: string, hash: string): boolean {
   try {
-    const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN);
+    const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_OPTS);
     const expected = Buffer.from(hash, 'hex');
     return derived.length === expected.length && crypto.timingSafeEqual(derived, expected);
   } catch {
@@ -43,15 +46,29 @@ export async function ensureAuthTables() {
   if (ensured) return;
   await sql`
     CREATE TABLE IF NOT EXISTS users (
-      id          SERIAL PRIMARY KEY,
-      email       VARCHAR(255) UNIQUE NOT NULL,
-      password_hash VARCHAR(255) NOT NULL,
-      password_salt VARCHAR(64)  NOT NULL,
+      id            SERIAL PRIMARY KEY,
+      email         VARCHAR(255) UNIQUE,
+      password_hash VARCHAR(255),
+      password_salt VARCHAR(64),
+      telegram_id       BIGINT,
+      telegram_username VARCHAR(64),
+      code_hash         VARCHAR(64),
+      bound_client_id   VARCHAR(64),
       active      BOOLEAN NOT NULL DEFAULT TRUE,
       expires_at  TIMESTAMP WITH TIME ZONE,
       created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
   `;
+  // Migrate older DBs to the Telegram-code model (idempotent).
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id BIGINT;`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(64);`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS code_hash VARCHAR(64);`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bound_client_id VARCHAR(64);`;
+  await sql`ALTER TABLE users ALTER COLUMN email DROP NOT NULL;`;
+  await sql`ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;`;
+  await sql`ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL;`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS users_telegram_id_key ON users(telegram_id);`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS users_code_hash_key ON users(code_hash);`;
   await sql`
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash  VARCHAR(64) PRIMARY KEY,
@@ -110,7 +127,11 @@ export async function isLockedOut(key: string): Promise<boolean> {
     if (!r) return false;
     const fresh = Date.now() - new Date(r.window_start as string).getTime() < LOGIN_WINDOW_MS;
     return fresh && (r.count as number) >= LOGIN_MAX;
-  } catch { return false; }
+  } catch (e) {
+    // Fail open (don't lock everyone out on a DB blip) but make it visible.
+    console.warn('login limiter unavailable (fail-open):', e instanceof Error ? e.message : e);
+    return false;
+  }
 }
 export async function recordFailedLogin(key: string): Promise<void> {
   try {
@@ -238,4 +259,88 @@ export async function deleteSession(token: string | null): Promise<void> {
 
 export function bearer(request: Request): string | null {
   return (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '') || null;
+}
+
+// =============================================================================
+// Telegram access-code login (device-bound). Provisioning happens via the bot:
+// the owner approves a user, which mints a random code stored only as a hash.
+// The extension exchanges the code (+ its device id) for a rotating session.
+// =============================================================================
+
+// Human-friendly base32 code, e.g. "K7QW-9F3M-2XTP" (~60 bits).
+const B32 = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L ambiguity
+export function newCode(): string {
+  const bytes = crypto.randomBytes(12);
+  let out = '';
+  for (let i = 0; i < 12; i++) out += B32[bytes[i] % B32.length];
+  return `${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}`;
+}
+function normCode(code: string): string {
+  return (code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+export function hashCode(code: string): string {
+  return crypto.createHash('sha256').update(normCode(code)).digest('hex');
+}
+
+/** Owner approved a Telegram user -> upsert the user and mint a FRESH code
+ *  (invalidating any prior code + device binding). Returns the plaintext code. */
+export async function approveTelegramUser(
+  telegramId: number,
+  username: string | null
+): Promise<{ code: string } | { error: string }> {
+  await ensureAuthTables();
+  const code = newCode();
+  const ch = hashCode(code);
+  try {
+    await sql`
+      INSERT INTO users (telegram_id, telegram_username, code_hash, bound_client_id, active)
+      VALUES (${telegramId}, ${(username || '').slice(0, 64) || null}, ${ch}, NULL, TRUE)
+      ON CONFLICT (telegram_id) DO UPDATE SET
+        telegram_username = EXCLUDED.telegram_username,
+        code_hash = EXCLUDED.code_hash,
+        bound_client_id = NULL,
+        active = TRUE
+    `;
+    return { code };
+  } catch (e) {
+    console.error('approveTelegramUser error:', e);
+    return { error: 'could not create user' };
+  }
+}
+
+/** Exchange an access code (+ device id) for a session identity. Enforces the
+ *  device binding: first use binds the code to that clientId; later uses from a
+ *  different device are rejected until the owner resets the binding. */
+export async function authenticateByCode(
+  code: string,
+  clientId: string
+): Promise<SessionUser | { error: 'invalid' | 'inactive' | 'expired' | 'bound' | 'no_device' }> {
+  await ensureAuthTables();
+  if (!clientId) return { error: 'no_device' };
+  const ch = hashCode(code);
+  const { rows } = await sql`
+    SELECT id, email, active, expires_at, bound_client_id
+    FROM users WHERE code_hash = ${ch} LIMIT 1
+  `;
+  const u = rows[0];
+  if (!u) return { error: 'invalid' };
+  if (u.active === false) return { error: 'inactive' };
+  if (u.expires_at && new Date(u.expires_at as string).getTime() < Date.now()) return { error: 'expired' };
+
+  const bound = u.bound_client_id as string | null;
+  if (!bound) {
+    await sql`UPDATE users SET bound_client_id = ${clientId} WHERE id = ${u.id}`;
+  } else if (bound !== clientId) {
+    return { error: 'bound' };
+  }
+  return { userId: u.id as number, email: (u.email as string) || `tg:${u.id}` };
+}
+
+/** Owner action: clear the device binding so the user can activate on a new
+ *  device (or hand the code to someone else). */
+export async function resetDeviceBinding(userId: number): Promise<void> {
+  try {
+    await sql`UPDATE users SET bound_client_id = NULL WHERE id = ${userId}`;
+    await sql`DELETE FROM sessions WHERE user_id = ${userId}`;
+  } catch { /* ignore */ }
 }
