@@ -878,7 +878,7 @@
   function scheduleCheck() {
     if (scheduled) return;
     scheduled = true;
-    setTimeout(() => { scheduled = false; checkPageState(); }, 200);
+    setTimeout(() => { scheduled = false; checkPageState(); }, CFG.DETECT_THROTTLE_MS || 90);
   }
   const observer = new MutationObserver(scheduleCheck);
   function startObserver() {
@@ -895,7 +895,7 @@
   // Randomize the first check a little so multiple tabs launched together stagger
   // their first action by a few hundred ms instead of firing in lockstep.
   setTimeout(checkPageState, 400 + Math.floor(Math.random() * 700));
-  setInterval(checkPageState, 1000); // failsafe (survives observer disconnect)
+  setInterval(checkPageState, CFG.FAILSAFE_CHECK_MS || 350); // failsafe (survives observer disconnect)
 
   // Stuck-load watchdog: while actively hunting on CIMEA, if no action has
   // happened for STUCK_RELOAD_MS the page is likely hung (spinner / pending

@@ -50,6 +50,12 @@ var CIMEA_CONFIG = {
   // reload more (may abandon a slow-but-real load); tune to taste.
   STUCK_RELOAD_MS: 8 * 1000, // 8s
 
+  // How fast the bot reacts after CIMEA changes the page. Lower = notices the
+  // next step sooner (higher retry rate) at a little more CPU. The per-step wait
+  // is mostly CIMEA's server, but this trims the bot's own reaction lag.
+  DETECT_THROTTLE_MS: 90,   // debounce after a DOM mutation before re-checking
+  FAILSAFE_CHECK_MS: 350,   // periodic re-check even if no mutation fires
+
   // -------------------------------------------------------------------------
   // PAGE DETECTION + DOM SELECTORS moved to the server (Layer 3). The extension
   // fetches them from <base>/api/playbook with a valid session and caches them
