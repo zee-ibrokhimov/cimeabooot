@@ -308,6 +308,29 @@ export async function approveTelegramUser(
   }
 }
 
+/** Repeat request from an ALREADY-APPROVED, active user: mint a FRESH code
+ *  (OTP-style) WITHOUT another owner approval, and DON'T touch bound_client_id —
+ *  so the new code stays locked to the same device they already activated on
+ *  (or binds on first use if they never activated). Returns the new plaintext
+ *  code, or null if the user isn't eligible (unknown / disabled / consumed),
+ *  in which case the caller falls back to the owner-approval flow. */
+export async function regenerateCodeForUser(telegramId: number): Promise<string | null> {
+  try {
+    await ensureAuthTables();
+    const { rows } = await sql`
+      SELECT id FROM users WHERE telegram_id = ${telegramId} AND active = TRUE LIMIT 1
+    `;
+    const u = rows[0];
+    if (!u) return null; // not approved / disabled / consumed -> owner approval
+    const code = newCode();
+    await sql`UPDATE users SET code_hash = ${hashCode(code)} WHERE id = ${u.id}`;
+    return code;
+  } catch (e) {
+    console.error('regenerateCodeForUser error:', e);
+    return null;
+  }
+}
+
 /** Exchange an access code (+ device id) for a session identity. Enforces the
  *  device binding: first use binds the code to that clientId; later uses from a
  *  different device are rejected until the owner resets the binding. */

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { tg, tgSend, btn, tgConfigured, adminChatId } from '../../../lib/telegram';
-import { approveTelegramUser } from '../../../lib/auth';
+import { approveTelegramUser, regenerateCodeForUser } from '../../../lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -53,6 +53,16 @@ async function onCallback(cb: TgCallback) {
 
   // Requester asks for access -> notify the owner with Approve/Deny.
   if (data === 'req' && fromId) {
+    // Already-approved, still-active user re-requesting: auto-issue a fresh
+    // OTP-style code bound to their existing device — no new owner approval.
+    const regen = await regenerateCodeForUser(fromId);
+    if (regen) {
+      await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'New access code sent.' });
+      await tgSend(fromId,
+        `🔑 Your new access code:\n\n<code>${regen}</code>\n\nPaste it in the CIMEA Helper Pro extension and press Activate — it works on your existing device.`
+      );
+      return;
+    }
     await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Request sent — awaiting approval.' });
     if (admin) {
       const uname = fromUser ? '@' + fromUser : '(no username)';
