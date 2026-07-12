@@ -48,7 +48,12 @@ var CIMEA_CONFIG = {
   // but nothing happens for this long, reload to try a fresh, maybe
   // less-loaded response instead of waiting. Lower = catch hangs sooner but
   // reload more (may abandon a slow-but-real load); tune to taste.
-  STUCK_RELOAD_MS: 8 * 1000, // 8s
+  STUCK_RELOAD_MS: 8 * 1000, // 8s — page loaded but idle/dead
+
+  // While the page is genuinely still loading (base load or a visible spinner),
+  // the watchdog WAITS instead of reloading (reloading a slow load just restarts
+  // it). It only gives up after this longer grace.
+  LOADING_MAX_MS: 15 * 1000, // 15s
 
   // How fast the bot reacts after CIMEA changes the page. Lower = notices the
   // next step sooner (higher retry rate) at a little more CPU. The per-step wait

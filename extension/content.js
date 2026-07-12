@@ -897,15 +897,31 @@
   setTimeout(checkPageState, 400 + Math.floor(Math.random() * 700));
   setInterval(checkPageState, CFG.FAILSAFE_CHECK_MS || 350); // failsafe (survives observer disconnect)
 
-  // Stuck-load watchdog: while actively hunting on CIMEA, if no action has
-  // happened for STUCK_RELOAD_MS the page is likely hung (spinner / pending
-  // request during the rush) — reload to race a fresh response. setNavigating()
-  // keeps lastActionAt fresh on every real action, so this only fires on a true
-  // stall. Never runs on the Nexi payment page (isCimea guard).
+  // Is the page still actively loading? (base document not done, OR a loading
+  // spinner is visible.) The watchdog must WAIT in that case — reloading a
+  // slow-but-real load just throws it away and restarts it.
+  function pageLooksLoading() {
+    if (document.readyState !== "complete") return true;
+    const sel = SEL.loading_selector;
+    if (sel) {
+      try {
+        const el = document.querySelector(sel);
+        if (el) { const r = el.getBoundingClientRect(); if (r.width > 1 && r.height > 1) return true; }
+      } catch (_) { /* bad selector */ }
+    }
+    return false;
+  }
+
+  // Stuck-load watchdog: reload ONLY when the page is truly stuck — loaded but
+  // idle/dead for STUCK_RELOAD_MS. If it's still LOADING (base load or spinner),
+  // wait the longer LOADING_MAX_MS before giving up, so a slow-but-real load
+  // isn't reloaded (which would just restart it). setNavigating() keeps
+  // lastActionAt fresh on every real action. Never runs on Nexi (isCimea guard).
   setInterval(() => {
     if (isPaused || !authOk || !PLAYBOOK || isNavigating || !isCimea()) return;
-    const stuckMs = CFG.STUCK_RELOAD_MS || 8000;
-    if (Date.now() - lastActionAt > stuckMs) {
+    const idle = Date.now() - lastActionAt;
+    const limit = pageLooksLoading() ? (CFG.LOADING_MAX_MS || 15000) : (CFG.STUCK_RELOAD_MS || 8000);
+    if (idle > limit) {
       logToDrawer(t("d_stuck_reload"));
       setNavigating(true); // mark progress + block re-fire until the reload
       setTimeout(() => { isNavigating = false; location.reload(); }, jitter(150));

@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 
 // Bump this whenever you change the recipe below; the extension logs it so you
 // can tell which users are on the current playbook.
-const PLAYBOOK_VERSION = '2026-07-11.1';
+const PLAYBOOK_VERSION = '2026-07-11.2';
 
 // -----------------------------------------------------------------------------
 // THE RECIPE. Everything here used to be hardcoded in the extension. Tune the
@@ -116,6 +116,10 @@ const PLAYBOOK = {
     // Session keep-alive: the icon-only "refresh token" button on the DiploMe
     // dashboard, next to "Session expires in mm:ss". Update if CIMEA changes it.
     session_refresh_btn: '.token-refresh button',
+    // Loading indicator(s). While one of these is visible the watchdog WAITS
+    // (a slow load shouldn't be reloaded — that just restarts it). Tune to the
+    // real DiploMe spinner if these miss it.
+    loading_selector: '.q-spinner, .q-inner-loading, .q-loading, .q-loading-bar, .cd-loading',
   },
 };
 
