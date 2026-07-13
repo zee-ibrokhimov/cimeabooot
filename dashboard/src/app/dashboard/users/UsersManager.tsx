@@ -17,6 +17,7 @@ export interface AdminUser {
   distinct_ips_7d: number;
   distinct_countries_7d: number;
   last_seen: string | null;
+  request_reason: string | null;
 }
 
 // Account-sharing signal: more than this many distinct IPs (or >1 country) in a
@@ -91,7 +92,14 @@ export default function UsersManager({ initialUsers }: { initialUsers: AdminUser
                 const suspicious = ips > SHARE_IP_THRESHOLD || countries > 1;
                 return (
                   <tr key={u.id} className="hover:bg-slate-800/30">
-                    <td className="px-5 py-3 font-medium">{label(u)}</td>
+                    <td className="px-5 py-3 align-top">
+                      <div className="font-medium">{label(u)}</div>
+                      {u.request_reason && (
+                        <div className="text-xs text-slate-400 mt-0.5 max-w-[260px] truncate" title={u.request_reason}>
+                          “{u.request_reason}”
+                        </div>
+                      )}
+                    </td>
                     <td className="px-5 py-3">
                       {u.active
                         ? <span className="inline-flex items-center gap-1 text-emerald-400"><CheckCircle2 className="w-4 h-4" /> active</span>

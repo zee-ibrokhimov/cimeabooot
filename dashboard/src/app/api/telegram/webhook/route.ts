@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { tg, tgSend, btn, tgConfigured, adminChatId } from '../../../lib/telegram';
-import { approveTelegramUser, regenerateCodeForUser } from '../../../lib/auth';
+import { tg, tgSend, btn, tgConfigured, adminChatIds, isAdmin } from '../../../lib/telegram';
+import {
+  approveTelegramUser, regenerateCodeForUser, recordAccessRequest, isActiveTelegramUser,
+} from '../../../lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,31 +32,72 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true });
 }
 
+const REQUEST_KB = { inline_keyboard: [[btn('🔑 Request access', 'req')]] };
+
+async function sendWelcome(chatId: number) {
+  await tgSend(chatId,
+    '👋 <b>Welcome to CIMEA Helper Pro</b>\n\n' +
+    'This helps you reach the CIMEA DiploMe payment page when request slots open.\n\n' +
+    'Access is <b>free</b>, but granted individually — the owner reviews each request personally to make sure it goes to people who genuinely need their credentials verified.\n\n' +
+    '<b>To get access:</b> tap <b>Request access</b> below, then reply with one message telling me why you need it (your situation / deadline). If approved, I’ll send you a one-time code for the extension.',
+    { reply_markup: REQUEST_KB },
+  );
+}
+
 async function onMessage(m: TgMessage) {
   const chatId = m.chat?.id;
+  const fromId = m.from?.id;
   if (!chatId) return;
   const text = (m.text || '').trim();
-  if (text.startsWith('/start') || /access|start/i.test(text)) {
-    await tgSend(chatId,
-      'Welcome to <b>CIMEA Helper Pro</b>.\nTap the button to request an access code. The owner will approve it.',
-      { reply_markup: { inline_keyboard: [[btn('🔑 Request access', 'req')]] } }
-    );
-  } else {
-    await tgSend(chatId, 'Tap /start to request access.');
+  const uname = m.from?.username || m.from?.first_name || '';
+
+  // Commands / greetings -> welcome.
+  if (text === '' || /^\/?(start|help|menu)\b/i.test(text)) {
+    await sendWelcome(chatId);
+    return;
+  }
+
+  // Already have access -> point them at Request access for a fresh code.
+  if (fromId && await isActiveTelegramUser(fromId)) {
+    await tgSend(chatId, '✅ You already have access. Tap <b>Request access</b> if you need a fresh code.', { reply_markup: REQUEST_KB });
+    return;
+  }
+
+  // Otherwise treat the message as the "why I need it" reason and pass it on.
+  if (!fromId) return;
+  if (text.length < 3) {
+    await tgSend(chatId, 'Please tell me in one message <b>why you need CIMEA access</b> (your situation), and I’ll pass it to the owner.', { reply_markup: REQUEST_KB });
+    return;
+  }
+  await recordAccessRequest(fromId, uname, text);
+  await tgSend(chatId, '🙏 Thanks — your request was sent to the owner for review. You’ll get your code here if it’s approved.');
+  await notifyAdmins(fromId, uname, text);
+}
+
+// Send the Approve/Deny prompt (with the person's reason) to every owner.
+async function notifyAdmins(fromId: number, uname: string, reason: string) {
+  const label = uname ? '@' + uname : '(no username)';
+  const body =
+    '🔔 <b>Access request</b>\n' +
+    `From: <b>${escapeHtml(label)}</b> (id <code>${fromId}</code>)\n\n` +
+    `<b>Reason:</b> ${escapeHtml(reason.slice(0, 600))}`;
+  const kb = { inline_keyboard: [[
+    btn('✅ Approve', `a:${fromId}:${(uname || '').slice(0, 20)}`),
+    btn('❌ Deny', `d:${fromId}`),
+  ]] };
+  for (const admin of adminChatIds()) {
+    await tgSend(admin, body, { reply_markup: kb });
   }
 }
 
 async function onCallback(cb: TgCallback) {
   const data = cb.data || '';
   const fromId = cb.from?.id;
-  const fromUser = cb.from?.username || cb.from?.first_name || '';
   const msg = cb.message;
-  const admin = adminChatId();
 
-  // Requester asks for access -> notify the owner with Approve/Deny.
+  // "Request access" button: an existing active user gets a fresh code instantly;
+  // a new requester is asked to explain their need (their reply is forwarded).
   if (data === 'req' && fromId) {
-    // Already-approved, still-active user re-requesting: auto-issue a fresh
-    // OTP-style code bound to their existing device — no new owner approval.
     const regen = await regenerateCodeForUser(fromId);
     if (regen) {
       await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'New access code sent.' });
@@ -63,23 +106,16 @@ async function onCallback(cb: TgCallback) {
       );
       return;
     }
-    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Request sent — awaiting approval.' });
-    if (admin) {
-      const uname = fromUser ? '@' + fromUser : '(no username)';
-      await tgSend(admin,
-        `🔔 Access request from <b>${escapeHtml(uname)}</b> (id <code>${fromId}</code>).`,
-        { reply_markup: { inline_keyboard: [[
-          btn('✅ Approve', `a:${fromId}:${(fromUser || '').slice(0, 20)}`),
-          btn('❌ Deny', `d:${fromId}`),
-        ]] } }
-      );
-    }
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Tell me why you need it 🙏' });
+    await tgSend(fromId,
+      'To request access, reply here with <b>one message</b> explaining why you need CIMEA slot access — your situation (e.g. deadline, why manual booking keeps failing). The owner reviews each request personally.'
+    );
     return;
   }
 
   // Owner-only actions.
   if ((data.startsWith('a:') || data.startsWith('d:'))) {
-    if (!admin || String(fromId) !== admin) {
+    if (!isAdmin(fromId)) {
       await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Not authorized.' });
       return;
     }

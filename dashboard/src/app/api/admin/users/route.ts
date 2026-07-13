@@ -29,7 +29,7 @@ export async function GET(request: Request) {
         u.active, u.expires_at, u.created_at,
         ul.last_payment_page, ul.payment_page_count, ul.success_count,
         ul.distinct_ips_7d, ul.distinct_countries_7d,
-        s.last_seen
+        s.last_seen, ar.reason AS request_reason
       FROM users u
       LEFT JOIN (
         SELECT user_id,
@@ -43,6 +43,7 @@ export async function GET(request: Request) {
       LEFT JOIN (
         SELECT user_id, MAX(last_seen_at) AS last_seen FROM sessions GROUP BY user_id
       ) s ON s.user_id = u.id
+      LEFT JOIN access_requests ar ON ar.telegram_id = u.telegram_id
       ORDER BY u.created_at DESC
     `;
     return NextResponse.json({ ok: true, users: rows }, { status: 200 });

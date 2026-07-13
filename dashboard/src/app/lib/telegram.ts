@@ -12,6 +12,18 @@ export function adminChatId(): string {
   return process.env.TELEGRAM_ADMIN_CHAT_ID || '';
 }
 
+// TELEGRAM_ADMIN_CHAT_ID may be a comma-separated list of owner chat ids; all of
+// them receive requests and can approve/deny.
+export function adminChatIds(): string[] {
+  return (process.env.TELEGRAM_ADMIN_CHAT_ID || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+export function isAdmin(id: number | string | undefined | null): boolean {
+  if (id == null) return false;
+  return adminChatIds().includes(String(id));
+}
+
 export async function tg(method: string, params: Record<string, unknown>): Promise<{ ok: boolean; result?: unknown; description?: string }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return { ok: false, description: 'TELEGRAM_BOT_TOKEN not set' };

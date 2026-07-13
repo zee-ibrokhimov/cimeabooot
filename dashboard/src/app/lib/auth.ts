@@ -108,7 +108,49 @@ export async function ensureAuthTables() {
       created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
   `;
+  // Access requests: the reason a person gave when asking for access, so the
+  // owner can vet genuine need. Kept separate from users (a request exists
+  // before approval). The dashboard joins this by telegram_id.
+  await sql`
+    CREATE TABLE IF NOT EXISTS access_requests (
+      telegram_id  BIGINT PRIMARY KEY,
+      username     VARCHAR(64),
+      reason       TEXT,
+      created_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `;
   ensured = true;
+}
+
+/** Store (or update) the reason a Telegram user gave when requesting access. */
+export async function recordAccessRequest(
+  telegramId: number,
+  username: string | null,
+  reason: string,
+): Promise<void> {
+  try {
+    await ensureAuthTables();
+    await sql`
+      INSERT INTO access_requests (telegram_id, username, reason, created_at)
+      VALUES (${telegramId}, ${(username || '').slice(0, 64) || null}, ${reason.slice(0, 1000)}, CURRENT_TIMESTAMP)
+      ON CONFLICT (telegram_id) DO UPDATE SET
+        username = EXCLUDED.username, reason = EXCLUDED.reason, created_at = CURRENT_TIMESTAMP
+    `;
+  } catch (e) {
+    console.error('recordAccessRequest error:', e);
+  }
+}
+
+/** True if this Telegram user already has active access (so the bot shouldn't
+ *  treat their message as a new request). */
+export async function isActiveTelegramUser(telegramId: number): Promise<boolean> {
+  try {
+    await ensureAuthTables();
+    const { rows } = await sql`SELECT 1 FROM users WHERE telegram_id = ${telegramId} AND active = TRUE LIMIT 1`;
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 // Session lifetime bounds.
