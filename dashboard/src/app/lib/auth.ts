@@ -153,6 +153,11 @@ export async function isActiveTelegramUser(telegramId: number): Promise<boolean>
   }
 }
 
+/** Remove a pending access request (e.g. after Deny) so it drops off the queue. */
+export async function clearAccessRequest(telegramId: number): Promise<void> {
+  try { await sql`DELETE FROM access_requests WHERE telegram_id = ${telegramId}`; } catch { /* ignore */ }
+}
+
 // Session lifetime bounds.
 const SESSION_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const SESSION_IDLE_MS = 7 * 24 * 60 * 60 * 1000;      // 7 days since last use

@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { tg, tgSend, btn, tgConfigured, adminChatIds, isAdmin } from '../../../lib/telegram';
 import {
-  approveTelegramUser, regenerateCodeForUser, recordAccessRequest, isActiveTelegramUser,
+  approveTelegramUser, regenerateCodeForUser, recordAccessRequest, isActiveTelegramUser, clearAccessRequest,
 } from '../../../lib/auth';
+
+// The owner's public Telegram for direct questions (shown to users).
+const OWNER_CONTACT = '@uniway_admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,7 +42,8 @@ async function sendWelcome(chatId: number) {
     '👋 <b>Welcome to CIMEA Helper Pro</b>\n\n' +
     'This helps you reach the CIMEA DiploMe payment page when request slots open.\n\n' +
     'Access is <b>free</b>, but granted individually — the owner reviews each request personally to make sure it goes to people who genuinely need their credentials verified.\n\n' +
-    '<b>To get access:</b> tap <b>Request access</b> below, then reply with one message telling me why you need it (your situation / deadline). If approved, I’ll send you a one-time code for the extension.',
+    '<b>To get access:</b> tap <b>Request access</b> below, then reply with one message telling me why you need it (your situation / deadline). If approved, I’ll send you a one-time code for the extension.\n\n' +
+    `💬 Questions? Message the owner: ${OWNER_CONTACT}`,
     { reply_markup: REQUEST_KB },
   );
 }
@@ -136,6 +140,7 @@ async function onCallback(cb: TgCallback) {
       await editAdmin(msg, `✅ Approved <code>${targetId}</code>. Code delivered.`);
       await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Approved & code sent.' });
     } else {
+      await clearAccessRequest(targetId); // drop it from the pending queue
       await tgSend(targetId, '❌ Your access request was declined.');
       await editAdmin(msg, `❌ Denied <code>${targetId}</code>.`);
       await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Denied.' });

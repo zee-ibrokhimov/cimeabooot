@@ -8,6 +8,8 @@ import UsersManager, { AdminUser } from './UsersManager';
 
 export const dynamic = 'force-dynamic';
 
+type PendingReq = { telegram_id: number; username: string | null; reason: string | null; created_at: string };
+
 export default async function UsersPage() {
   if (!process.env.ADMIN_TOKEN) {
     return <LoginForm reason="Set the ADMIN_TOKEN environment variable in Vercel to enable the dashboard." />;
@@ -18,6 +20,7 @@ export default async function UsersPage() {
   }
 
   let users: AdminUser[] = [];
+  let pending: PendingReq[] = [];
   let dbError: string | null = null;
   try {
     await ensureAuthTables();
@@ -27,7 +30,7 @@ export default async function UsersPage() {
         u.active, u.expires_at, u.created_at,
         ul.last_payment_page, ul.payment_page_count, ul.success_count,
         ul.distinct_ips_7d, ul.distinct_countries_7d,
-        s.last_seen
+        s.last_seen, ar.reason AS request_reason
       FROM users u
       LEFT JOIN (
         SELECT user_id,
@@ -41,9 +44,21 @@ export default async function UsersPage() {
       LEFT JOIN (
         SELECT user_id, MAX(last_seen_at) AS last_seen FROM sessions GROUP BY user_id
       ) s ON s.user_id = u.id
+      LEFT JOIN access_requests ar ON ar.telegram_id = u.telegram_id
       ORDER BY u.created_at DESC
     `;
     users = rows as unknown as AdminUser[];
+
+    // People who asked for access but aren't approved users yet (the vetting queue).
+    const pend = await sql`
+      SELECT ar.telegram_id, ar.username, ar.reason, ar.created_at
+      FROM access_requests ar
+      LEFT JOIN users u ON u.telegram_id = ar.telegram_id
+      WHERE u.id IS NULL
+      ORDER BY ar.created_at DESC
+      LIMIT 100
+    `;
+    pending = pend.rows as unknown as PendingReq[];
   } catch (e) {
     dbError = e instanceof Error ? e.message : 'Could not load users.';
   }
@@ -63,6 +78,33 @@ export default async function UsersPage() {
         {dbError && (
           <div className="p-4 mb-6 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400">{dbError}</div>
         )}
+
+        {/* Pending access requests — the vetting queue (approve/deny in the bot) */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden mb-6">
+          <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-3">
+            <span className="font-semibold">🕓 Pending access requests</span>
+            <span className="text-xs text-slate-500">{pending.length} awaiting review · approve/deny in the Telegram bot</span>
+          </div>
+          {pending.length === 0 ? (
+            <div className="px-6 py-8 text-center text-slate-500">No pending requests.</div>
+          ) : (
+            <ul className="divide-y divide-slate-800/50">
+              {pending.map((p) => (
+                <li key={p.telegram_id} className="px-6 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">
+                      {p.username ? '@' + p.username : 'user'}{' '}
+                      <span className="text-slate-500 font-mono text-xs">#{p.telegram_id}</span>
+                    </span>
+                    <span className="text-xs text-slate-500">{new Date(p.created_at).toLocaleString()}</span>
+                  </div>
+                  {p.reason && <p className="text-sm text-slate-400 mt-1 whitespace-pre-wrap break-words">“{p.reason}”</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <UsersManager initialUsers={users} />
       </div>
     </div>
