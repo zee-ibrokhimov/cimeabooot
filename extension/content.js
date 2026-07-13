@@ -902,6 +902,12 @@
   // slow-but-real load just throws it away and restarts it.
   function pageLooksLoading() {
     if (document.readyState !== "complete") return true;
+    // In-flight network requests (from inflight.js in the page world) = the app
+    // is still fetching = still loading. This is the robust, selector-free signal.
+    try {
+      if (document.documentElement.getAttribute("data-cimea-inflight") === "1") return true;
+    } catch (_) { /* ignore */ }
+    // Spinner fallback (belt-and-suspenders; needs the right loading_selector).
     const sel = SEL.loading_selector;
     if (sel) {
       try {
