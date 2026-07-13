@@ -1,6 +1,9 @@
 import React from 'react';
 import Link from 'next/link';
-import { Zap, RefreshCw, ShieldCheck, Bell, CreditCard, Volume2 } from 'lucide-react';
+import { Zap, RefreshCw, ShieldCheck, Bell, CreditCard, Volume2, Send } from 'lucide-react';
+
+// Where users request access (your Telegram bot). Change if you rename the bot.
+const TELEGRAM_BOT_URL = 'https://t.me/cimearadarbot';
 
 export default function LandingPage() {
   return (
@@ -14,7 +17,10 @@ export default function LandingPage() {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center font-bold text-slate-950">C</div>
             <span className="font-bold text-xl tracking-tight">CIMEA Helper Pro</span>
           </div>
-          <Link href="/dashboard" className="text-sm font-semibold text-slate-300 hover:text-emerald-400 transition-colors">Owner Dashboard</Link>
+          <div className="flex items-center gap-5">
+            <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-slate-300 hover:text-emerald-400 transition-colors">Get Access</a>
+            <Link href="/dashboard" className="text-sm font-semibold text-slate-300 hover:text-emerald-400 transition-colors">Owner Dashboard</Link>
+          </div>
         </div>
       </nav>
 
@@ -29,11 +35,20 @@ export default function LandingPage() {
           Auto-navigation, auto-retry on server errors, and payment alerts. Only anonymous usage
           statistics are shared — never your card, CVC, or Telegram token.
         </p>
-        <a href="/cimea-helper-pro.zip"
-           className="inline-flex items-center gap-2 px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold transition-transform hover:scale-105">
-          Download Extension
-        </a>
-        <p className="text-slate-500 text-sm mt-4">Load unpacked in <code className="text-slate-300">chrome://extensions</code> (Developer mode).</p>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+          <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer"
+             className="inline-flex items-center gap-2 px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold transition-transform hover:scale-105">
+            <Send className="w-4 h-4" /> Request Access on Telegram
+          </a>
+          <a href="/cimea-helper-pro.zip"
+             className="inline-flex items-center gap-2 px-8 py-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-full font-bold transition-transform hover:scale-105">
+            Download Extension
+          </a>
+        </div>
+        <p className="text-slate-500 text-sm mt-6 max-w-2xl mx-auto">
+          New here? Tap <b className="text-slate-300">Request Access</b> — the owner approves you and the bot sends your code.
+          Then load the extension unpacked in <code className="text-slate-300">chrome://extensions</code> (Developer mode) and paste your code.
+        </p>
       </section>
 
       <section className="py-20 border-t border-slate-800/50 bg-slate-900/20">
