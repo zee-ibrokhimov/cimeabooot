@@ -41,8 +41,6 @@ async function sendWelcome(chatId: number) {
   await tgSend(chatId,
     '👋 <b>Welcome to CIMEA Helper Pro</b>\n\n' +
     'This helps you reach the CIMEA DiploMe payment page when request slots open.\n\n' +
-    'Access is <b>free</b>, but granted individually — the owner reviews each request personally to make sure it goes to people who genuinely need their credentials verified.\n\n' +
-    '<b>To get access:</b> tap <b>Request access</b> below, then reply with one message telling me why you need it (your situation / deadline). If approved, I’ll send you a one-time code for the extension.\n\n' +
     `💬 Questions? Message the owner: ${OWNER_CONTACT}`,
     { reply_markup: REQUEST_KB },
   );
