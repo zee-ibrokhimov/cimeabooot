@@ -53,6 +53,17 @@
         </button>
         <span id="refreshStatus" class="hint" style="display:block;margin-top:6px;"></span>
       </div>
+      <div class="panel" style="margin-bottom:12px;">
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label" data-i18n="schedule_label">⏰ Scheduled auto-start</span>
+            <span class="setting-desc" data-i18n="schedule_desc">Auto-start at a set time. Open your tab(s) first; each tab starts a moment apart.</span>
+          </div>
+          <label class="switch"><input type="checkbox" id="scheduleArmToggle" /><span class="slider round"></span></label>
+        </div>
+        <input type="time" id="targetTime" step="1" class="field" style="text-align:center;margin-top:10px;" />
+        <span id="scheduleStatus" class="hint" style="display:block;text-align:center;margin-top:6px;"></span>
+      </div>
       <div class="settings-group">
         <div class="setting-item">
           <div class="setting-info">

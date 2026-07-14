@@ -61,6 +61,11 @@ var CIMEA_CONFIG = {
   DETECT_THROTTLE_MS: 90,   // debounce after a DOM mutation before re-checking
   FAILSAFE_CHECK_MS: 350,   // periodic re-check even if no mutation fires
 
+  // Scheduled auto-start: how far apart each open tab auto-starts (ms). Tab #0
+  // fires at the target time, #1 at +STAGGER_GAP_MS, #2 at +2×, etc., so several
+  // tabs/windows don't all refresh in the same instant.
+  STAGGER_GAP_MS: 400,
+
   // -------------------------------------------------------------------------
   // PAGE DETECTION + DOM SELECTORS moved to the server (Layer 3). The extension
   // fetches them from <base>/api/playbook with a valid session and caches them

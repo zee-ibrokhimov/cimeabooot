@@ -245,6 +245,9 @@
         logToDrawer(t("d_autopaused_other_tab"));
       }
     }
+    // Re-arming (or changing the target time) resets this tab's schedule so it
+    // grabs a fresh stagger slot and can fire again.
+    if (changes.scheduleArmed || changes.targetTime) resetSchedule();
   });
 
   const isCimea = () => location.hostname.includes("cimea-diplome.it");
@@ -451,31 +454,36 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Start a run (manual OR scheduled): gate on a valid session + the server
+  // recipe, then arm the observer. Resolves true only if it actually started.
+  function beginAutomation(step) {
+    return ensureReady().then((r) => {
+      if (!r.ok) {
+        isPaused = true;
+        chrome.storage.local.set({ automationActive: false });
+        injectDrawer();
+        logToDrawer(t(r.reason === "playbook" ? "d_no_playbook" : "d_not_logged_in"));
+        return false;
+      }
+      isPaused = false;
+      markAuthorized();
+      sessionId = newSessionId();
+      runStartedAt = Date.now();
+      chrome.storage.local.set({ automationActive: true });
+      injectDrawer();
+      startObserver();
+      logToDrawer(t("d_started"));
+      track("automation_started", { step });
+      return true;
+    });
+  }
+
   // Manual trigger from the popup
   // ---------------------------------------------------------------------------
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request && request.action === "startAutomation") {
       // Server-gated: never run without a valid session AND the server recipe.
-      ensureReady().then((r) => {
-        if (!r.ok) {
-          isPaused = true;
-          chrome.storage.local.set({ automationActive: false });
-          injectDrawer();
-          logToDrawer(t(r.reason === "playbook" ? "d_no_playbook" : "d_not_logged_in"));
-          sendResponse({ status: "unauthorized" });
-          return;
-        }
-        isPaused = false;
-        markAuthorized();
-        sessionId = newSessionId();
-        runStartedAt = Date.now();
-        chrome.storage.local.set({ automationActive: true });
-        injectDrawer();
-        startObserver();
-        logToDrawer(t("d_started"));
-        track("automation_started", { step: "manual" });
-        sendResponse({ status: "success" });
-      });
+      beginAutomation("manual").then((ok) => sendResponse({ status: ok ? "success" : "unauthorized" }));
       return true; // async sendResponse
     }
 
@@ -942,4 +950,86 @@
       loadPlaybook().then((loaded) => { if (loaded) scheduleAutoRefresh(); });
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // Scheduled auto-start. Open your CIMEA tab(s) before the drop, set a target
+  // time (HH:MM:SS) + Arm in the popup. Each tab auto-starts at that time,
+  // staggered by STAGGER_GAP_MS × its slot so they don't fire in lockstep.
+  // ---------------------------------------------------------------------------
+  let myStaggerMs = null;      // this tab's offset AFTER the target time
+  let scheduledFired = false;  // so a tab only auto-starts once per arming
+  let lastCountdownSec = -1;
+
+  function resetSchedule() { myStaggerMs = null; scheduledFired = false; lastCountdownSec = -1; }
+
+  function parseTargetToday(hms) {
+    const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec((hms || "").trim());
+    if (!m) return null;
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+                    +m[1], +m[2], +(m[3] || 0), 0).getTime();
+  }
+
+  // Grab this tab's stagger slot from a shared counter (even spacing across
+  // tabs/windows), plus a little jitter to break ties under timer throttling.
+  function grabStagger() {
+    return new Promise((resolve) => {
+      if (myStaggerMs !== null) return resolve(myStaggerMs);
+      try {
+        chrome.storage.local.get(["tabSlotCounter"], (r) => {
+          const idx = r.tabSlotCounter || 0;
+          chrome.storage.local.set({ tabSlotCounter: idx + 1 }, () => {
+            myStaggerMs = idx * (CFG.STAGGER_GAP_MS || 400) + Math.floor(Math.random() * 150);
+            resolve(myStaggerMs);
+          });
+        });
+      } catch (_) { myStaggerMs = 0; resolve(0); }
+    });
+  }
+
+  function setCountdown(text) {
+    injectDrawer();
+    let el = document.getElementById("cimea-countdown");
+    if (!el) {
+      const c = document.getElementById("cimea-log-container");
+      if (!c || !c.parentNode) return;
+      el = document.createElement("div");
+      el.id = "cimea-countdown";
+      el.style.cssText = "background:rgba(16,185,129,0.12);color:#6ee7b7;padding:10px;border-radius:6px;font-weight:600;text-align:center;margin-bottom:8px;font-size:13px;";
+      c.parentNode.insertBefore(el, c);
+    }
+    el.textContent = text;
+  }
+  function clearCountdown() { const el = document.getElementById("cimea-countdown"); if (el) el.remove(); }
+
+  async function scheduleTick() {
+    let s;
+    try { s = await new Promise((res) => chrome.storage.local.get(["scheduleArmed", "targetTime", "automationActive"], res)); }
+    catch (_) { return; }
+    if (!s.scheduleArmed || s.automationActive || scheduledFired || !isCimea()) { clearCountdown(); return; }
+    const target = parseTargetToday(s.targetTime);
+    if (target == null) return;
+    await grabStagger();
+    const fireAt = target + myStaggerMs;
+    const remaining = fireAt - Date.now();
+    if (remaining > 0) {
+      if (remaining <= 6 * 60 * 60 * 1000) { // don't show a huge countdown for a stale target
+        const sec = Math.ceil(remaining / 1000);
+        if (sec !== lastCountdownSec) {
+          lastCountdownSec = sec;
+          const mm = Math.floor(sec / 60), ss = sec % 60;
+          setCountdown("⏰ " + t("d_scheduled_countdown") + " " + mm + ":" + String(ss).padStart(2, "0"));
+        }
+      }
+      return;
+    }
+    // Target reached — fire once (ignore an absurdly-late target > 5 min past).
+    if (Date.now() < fireAt + 5 * 60 * 1000) {
+      scheduledFired = true;
+      clearCountdown();
+      logToDrawer(t("d_scheduled_go"));
+      beginAutomation("scheduled");
+    }
+  }
+  setInterval(scheduleTick, 250);
 })();

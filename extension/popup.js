@@ -34,6 +34,10 @@ document.addEventListener("DOMContentLoaded", () => {
     cardNum: $("cardNum"),
     cardExp: $("cardExp"),
     cardCvc: $("cardCvc"),
+    // scheduled auto-start
+    targetTime: $("targetTime"),
+    scheduleArm: $("scheduleArmToggle"),
+    scheduleStatus: $("scheduleStatus"),
     statRetries: $("stat-retries"),
     statTime: $("stat-time")
   };
@@ -175,7 +179,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const STORAGE_KEYS = [
     "fastNav", "autoRetry", "soundAlert", "fastLoad", "speed", "procedure", "tabCount",
     "cardName", "cardNum", "cardExp", "cardCvc",
-    "totalRetries"
+    "totalRetries", "scheduleArmed", "targetTime"
   ];
   chrome.storage.local.get(STORAGE_KEYS, (s) => {
     els.fastNav.checked = s.fastNav !== false;
@@ -196,7 +200,38 @@ document.addEventListener("DOMContentLoaded", () => {
     els.statTime.textContent = secs >= 60
       ? Math.floor(secs / 60) + "m " + (secs % 60) + "s"
       : secs + "s";
+
+    if (els.targetTime) els.targetTime.value = s.targetTime || "";
+    if (els.scheduleArm) els.scheduleArm.checked = !!s.scheduleArmed;
+    updateScheduleStatus();
   });
+
+  // ---- Scheduled auto-start ----------------------------------------------
+  function updateScheduleStatus() {
+    if (!els.scheduleStatus) return;
+    const armed = els.scheduleArm && els.scheduleArm.checked;
+    const time = els.targetTime && els.targetTime.value;
+    els.scheduleStatus.textContent = armed
+      ? (time ? t("status_armed_for") + " " + time + " — " + t("status_open_tabs") : t("status_set_time"))
+      : "";
+  }
+  if (els.targetTime) {
+    els.targetTime.addEventListener("change", () => {
+      chrome.storage.local.set({ targetTime: els.targetTime.value });
+      updateScheduleStatus();
+    });
+  }
+  if (els.scheduleArm) {
+    els.scheduleArm.addEventListener("change", () => {
+      // Reset the shared stagger counter each time we (re)arm.
+      chrome.storage.local.set({
+        scheduleArmed: els.scheduleArm.checked,
+        tabSlotCounter: 0,
+        targetTime: els.targetTime ? els.targetTime.value : "",
+      });
+      updateScheduleStatus();
+    });
+  }
 
   // ---- Persist on change --------------------------------------------------
   function persist() {
