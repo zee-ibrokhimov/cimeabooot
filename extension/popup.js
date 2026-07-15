@@ -38,6 +38,7 @@ document.addEventListener("DOMContentLoaded", () => {
     targetTime: $("targetTime"),
     scheduleArm: $("scheduleArmToggle"),
     scheduleStatus: $("scheduleStatus"),
+    scheduleTabs: $("scheduleTabs"),
     statRetries: $("stat-retries"),
     statTime: $("stat-time")
   };
@@ -179,7 +180,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const STORAGE_KEYS = [
     "fastNav", "autoRetry", "soundAlert", "fastLoad", "speed", "procedure", "tabCount",
     "cardName", "cardNum", "cardExp", "cardCvc",
-    "totalRetries", "scheduleArmed", "targetTime"
+    "totalRetries", "scheduleArmed", "targetTime", "scheduleTabs"
   ];
   chrome.storage.local.get(STORAGE_KEYS, (s) => {
     els.fastNav.checked = s.fastNav !== false;
@@ -203,6 +204,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (els.targetTime) els.targetTime.value = s.targetTime || "";
     if (els.scheduleArm) els.scheduleArm.checked = !!s.scheduleArmed;
+    if (els.scheduleTabs) els.scheduleTabs.value = s.scheduleTabs || "1";
     updateScheduleStatus();
   });
 
@@ -228,8 +230,14 @@ document.addEventListener("DOMContentLoaded", () => {
         scheduleArmed: els.scheduleArm.checked,
         tabSlotCounter: 0,
         targetTime: els.targetTime ? els.targetTime.value : "",
+        scheduleTabs: els.scheduleTabs ? els.scheduleTabs.value : "1",
       });
       updateScheduleStatus();
+    });
+  }
+  if (els.scheduleTabs) {
+    els.scheduleTabs.addEventListener("change", () => {
+      chrome.storage.local.set({ scheduleTabs: els.scheduleTabs.value });
     });
   }
 

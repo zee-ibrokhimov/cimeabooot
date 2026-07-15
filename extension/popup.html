@@ -62,7 +62,18 @@
           <label class="switch"><input type="checkbox" id="scheduleArmToggle" /><span class="slider round"></span></label>
         </div>
         <input type="time" id="targetTime" step="1" class="field" style="text-align:center;margin-top:10px;" />
-        <span id="scheduleStatus" class="hint" style="display:block;text-align:center;margin-top:6px;"></span>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;">
+          <span class="setting-label" data-i18n="schedule_tabs_label">Tabs to open</span>
+          <select id="scheduleTabs" class="field" style="width:90px;">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+          </select>
+        </div>
+        <span id="scheduleStatus" class="hint" style="display:block;text-align:center;margin-top:8px;"></span>
       </div>
       <div class="settings-group">
         <div class="setting-item">

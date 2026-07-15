@@ -445,6 +445,26 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true; // async
   }
 
+  // Open N more CIMEA tabs (staggered) so a scheduled run can use several tabs.
+  // Each new tab auto-resumes because automationActive is already set. No extra
+  // permission needed for chrome.tabs.create.
+  if (request && request.type === "launchTabs") {
+    const count = Math.max(0, Math.min(10, request.count | 0));
+    const url = typeof request.url === "string" ? request.url : "";
+    if (url) {
+      let opened = 0;
+      const openNext = () => {
+        if (opened >= count) return;
+        opened++;
+        try { chrome.tabs.create({ url, active: false }, () => void chrome.runtime.lastError); } catch (_) { /* ignore */ }
+        setTimeout(openNext, 300 + Math.floor(Math.random() * 200)); // stagger openings
+      };
+      openNext();
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (request && request.type === "notify") {
     notify(request.title, request.body);
     sendResponse({ ok: true });

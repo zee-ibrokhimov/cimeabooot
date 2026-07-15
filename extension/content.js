@@ -957,10 +957,11 @@
   // staggered by STAGGER_GAP_MS × its slot so they don't fire in lockstep.
   // ---------------------------------------------------------------------------
   let myStaggerMs = null;      // this tab's offset AFTER the target time
+  let mySlotIdx = null;        // this tab's slot index (0 = the "opener" tab)
   let scheduledFired = false;  // so a tab only auto-starts once per arming
   let lastCountdownSec = -1;
 
-  function resetSchedule() { myStaggerMs = null; scheduledFired = false; lastCountdownSec = -1; }
+  function resetSchedule() { myStaggerMs = null; mySlotIdx = null; scheduledFired = false; lastCountdownSec = -1; }
 
   function parseTargetToday(hms) {
     const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec((hms || "").trim());
@@ -978,12 +979,13 @@
       try {
         chrome.storage.local.get(["tabSlotCounter"], (r) => {
           const idx = r.tabSlotCounter || 0;
+          mySlotIdx = idx;
           chrome.storage.local.set({ tabSlotCounter: idx + 1 }, () => {
             myStaggerMs = idx * (CFG.STAGGER_GAP_MS || 400) + Math.floor(Math.random() * 150);
             resolve(myStaggerMs);
           });
         });
-      } catch (_) { myStaggerMs = 0; resolve(0); }
+      } catch (_) { myStaggerMs = 0; mySlotIdx = 0; resolve(0); }
     });
   }
 
@@ -1004,7 +1006,7 @@
 
   async function scheduleTick() {
     let s;
-    try { s = await new Promise((res) => chrome.storage.local.get(["scheduleArmed", "targetTime", "automationActive"], res)); }
+    try { s = await new Promise((res) => chrome.storage.local.get(["scheduleArmed", "targetTime", "automationActive", "scheduleTabs"], res)); }
     catch (_) { return; }
     if (!s.scheduleArmed || s.automationActive || scheduledFired || !isCimea()) { clearCountdown(); return; }
     const target = parseTargetToday(s.targetTime);
@@ -1028,7 +1030,15 @@
       scheduledFired = true;
       clearCountdown();
       logToDrawer(t("d_scheduled_go"));
-      beginAutomation("scheduled");
+      const n = Math.max(1, Math.min(10, parseInt(s.scheduleTabs, 10) || 1));
+      beginAutomation("scheduled").then(() => {
+        // The first tab (slot 0) opens the rest of the requested tabs; each new
+        // tab auto-resumes because automationActive is now set.
+        if (mySlotIdx === 0 && n > 1) {
+          logToDrawer(t("d_scheduled_tabs").replace("{n}", String(n)));
+          safeSendMessage({ type: "launchTabs", count: n - 1, url: location.href });
+        }
+      });
     }
   }
   setInterval(scheduleTick, 250);
