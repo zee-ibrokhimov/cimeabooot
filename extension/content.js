@@ -915,6 +915,13 @@
     try {
       if (document.documentElement.getAttribute("data-cimea-inflight") === "1") return true;
     } catch (_) { /* ignore */ }
+    // A blank / near-empty page means the SPA shell is up but nothing has
+    // rendered yet — i.e. it's still loading, even though readyState says
+    // "complete". This is the white-screen case: WAIT, don't reload.
+    // getPageText() excludes our own drawer, so this measures the real page.
+    try {
+      if (getPageText().trim().length < 40) return true;
+    } catch (_) { /* ignore */ }
     // Spinner fallback (belt-and-suspenders; needs the right loading_selector).
     const sel = SEL.loading_selector;
     if (sel) {
@@ -934,9 +941,12 @@
   setInterval(() => {
     if (isPaused || !authOk || !PLAYBOOK || isNavigating || !isCimea()) return;
     const idle = Date.now() - lastActionAt;
-    const limit = pageLooksLoading() ? (CFG.LOADING_MAX_MS || 15000) : (CFG.STUCK_RELOAD_MS || 8000);
+    const loading = pageLooksLoading();
+    const limit = loading ? (CFG.LOADING_MAX_MS || 30000) : (CFG.STUCK_RELOAD_MS || 8000);
     if (idle > limit) {
-      logToDrawer(t("d_stuck_reload"));
+      // Distinct message so it's always obvious WHY it reloaded: a page that was
+      // still loading (gave up after LOADING_MAX_MS) vs a loaded-but-dead page.
+      logToDrawer(t(loading ? "d_stuck_loading" : "d_stuck_reload"));
       setNavigating(true); // mark progress + block re-fire until the reload
       setTimeout(() => { isNavigating = false; location.reload(); }, jitter(150));
     }
