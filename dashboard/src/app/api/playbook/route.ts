@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 
 // Bump this whenever you change the recipe below; the extension logs it so you
 // can tell which users are on the current playbook.
-const PLAYBOOK_VERSION = '2026-07-11.2';
+const PLAYBOOK_VERSION = '2026-07-13.1';
 
 // -----------------------------------------------------------------------------
 // THE RECIPE. Everything here used to be hardcoded in the extension. Tune the
@@ -63,6 +63,15 @@ const PLAYBOOK = {
       'no slots available', 'no appointments available',
       'slot no longer available', 'this slot is no longer available',
       'nessun posto disponibile', 'posti esauriti', 'non ci sono slot disponibili',
+      // "slots already booked, come back later" — the drop-day race message.
+      // Keep the bot retrying (a slot frees when someone booked doesn't pay)
+      // instead of stalling. English + Italian variants (best-guess; refine once
+      // we have the exact wording).
+      'already booked', 'slots are already booked', 'slot is already booked',
+      'fully booked', 'all slots are booked', 'all the slots are booked',
+      'all appointments are booked', 'no more slots', 'no slots left', 'sold out',
+      'già prenotato', 'già prenotati', 'tutti i posti sono prenotati',
+      'tutti gli slot sono prenotati', 'posti già prenotati', 'tutto esaurito',
     ],
     login_required: [
       'session expired', 'your session has expired', 'you have been logged out',
