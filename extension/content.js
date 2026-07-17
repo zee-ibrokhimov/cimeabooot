@@ -14,6 +14,21 @@
   if (window.top !== window) return;
 
   const CFG = (typeof CIMEA_CONFIG !== "undefined") ? CIMEA_CONFIG : {};
+
+  // Build tag (shown in the popup) so we can confirm which content script is
+  // actually running, and a persistent reload log so the reason survives the
+  // reload that wipes the on-page drawer.
+  const BUILD = "2026-07-13-r1";
+  function logReload(reason) {
+    try {
+      chrome.storage.local.get(["reloadLog"], (r) => {
+        const log = Array.isArray(r.reloadLog) ? r.reloadLog : [];
+        log.unshift({ r: reason, t: new Date().toLocaleTimeString(), b: BUILD });
+        chrome.storage.local.set({ reloadLog: log.slice(0, 12), buildTag: BUILD });
+      });
+    } catch (_) { /* ignore */ }
+  }
+  try { chrome.storage.local.set({ buildTag: BUILD }); } catch (_) { /* ignore */ }
   let lang = (typeof cimeaDefaultLang === "function") ? cimeaDefaultLang() : "en";
   const t = (key) => (typeof cimeaT === "function") ? cimeaT(key, lang) : key;
   let actionDelay = 1000;
@@ -629,6 +644,7 @@
         track("error", { errorType: "rate_limited" });
       }
       logToDrawer(t("d_blocked"));
+      logReload("rate-limited / blocked (back off ~45s)");
       setNavigating(true);
       setTimeout(() => { isNavigating = false; blockAlerted = false; location.reload(); }, jitter(45000));
       return;
@@ -637,6 +653,7 @@
     // Maintenance page — wait ~30s and retry.
     if (hasAny(pageText, DETECT.maintenance)) {
       logToDrawer(t("d_maintenance"));
+      logReload("maintenance page (~30s)");
       track("error", { errorType: "maintenance" });
       setNavigating(true);
       setTimeout(() => { isNavigating = false; location.reload(); }, jitter(30000));
@@ -646,6 +663,7 @@
     // Server 5xx — reload.
     if (hasAny(pageText, DETECT.server_error)) {
       logToDrawer(t("d_server_error"));
+      logReload("server error (5xx) on page");
       track("server_crash_detected", { errorType: "server_5xx" });
       setNavigating(true);
       setTimeout(() => { isNavigating = false; location.reload(); }, retryDelay());
@@ -655,6 +673,7 @@
     // "System busy — try again" congestion notice — retry immediately.
     if (hasAny(pageText, DETECT.busy)) {
       logToDrawer(t("d_system_busy"));
+      logReload("'system busy / try again' on page");
       bumpRetries("busy_retry");
       setNavigating(true);
       setTimeout(() => { isNavigating = false; location.reload(); }, busyRetryDelay());
@@ -908,20 +927,26 @@
   // Is the page still actively loading? (base document not done, OR a loading
   // spinner is visible.) The watchdog must WAIT in that case — reloading a
   // slow-but-real load just throws it away and restarts it.
+  let _lastTextLen = -1, _lastTextChangeAt = 0;
   function pageLooksLoading() {
     if (document.readyState !== "complete") return true;
     // In-flight network requests (from inflight.js in the page world) = the app
-    // is still fetching = still loading. This is the robust, selector-free signal.
+    // is still fetching = still loading. Robust, selector-free signal.
     try {
       if (document.documentElement.getAttribute("data-cimea-inflight") === "1") return true;
     } catch (_) { /* ignore */ }
-    // A blank / near-empty page means the SPA shell is up but nothing has
-    // rendered yet — i.e. it's still loading, even though readyState says
-    // "complete". This is the white-screen case: WAIT, don't reload.
-    // getPageText() excludes our own drawer, so this measures the real page.
-    try {
-      if (getPageText().trim().length < 40) return true;
-    } catch (_) { /* ignore */ }
+    // Read the real page text once (drawer excluded) and use it two ways:
+    let txt = null;
+    try { txt = getPageText(); } catch (_) { txt = null; }
+    if (txt != null) {
+      // (a) Blank / near-empty page = the SPA shell is up but nothing rendered
+      //     yet (the white-screen case). WAIT, don't reload.
+      if (txt.trim().length < 40) return true;
+      // (b) Content still growing/changing = the app is actively rendering data.
+      //     Treat "changed within ~1.6s" as still loading.
+      if (txt.length !== _lastTextLen) { _lastTextLen = txt.length; _lastTextChangeAt = Date.now(); }
+      if (Date.now() - _lastTextChangeAt < 1600) return true;
+    }
     // Spinner fallback (belt-and-suspenders; needs the right loading_selector).
     const sel = SEL.loading_selector;
     if (sel) {
@@ -947,6 +972,7 @@
       // Distinct message so it's always obvious WHY it reloaded: a page that was
       // still loading (gave up after LOADING_MAX_MS) vs a loaded-but-dead page.
       logToDrawer(t(loading ? "d_stuck_loading" : "d_stuck_reload"));
+      logReload(loading ? "watchdog: still loading after 30s" : "watchdog: page loaded but dead 8s");
       setNavigating(true); // mark progress + block re-fire until the reload
       setTimeout(() => { isNavigating = false; location.reload(); }, jitter(150));
     }

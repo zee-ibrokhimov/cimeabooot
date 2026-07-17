@@ -241,6 +241,24 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // ---- Diagnostics: build tag + why-it-reloaded log (survives reloads) -----
+  (function loadDiagnostics() {
+    const buildEl = $("buildTag"), logEl = $("reloadLog");
+    if (!buildEl && !logEl) return;
+    chrome.storage.local.get(["buildTag", "reloadLog"], (s) => {
+      if (buildEl) buildEl.textContent = "build " + (s.buildTag || "?");
+      if (logEl) {
+        const log = Array.isArray(s.reloadLog) ? s.reloadLog : [];
+        logEl.innerHTML = log.length
+          ? log.map((e) =>
+              '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+              '<span style="color:#64748b;">' + (e.t || "") + '</span> — ' +
+              String(e.r || "").replace(/</g, "&lt;") + '</div>').join("")
+          : '<div style="padding:6px 0;">No reloads recorded yet.</div>';
+      }
+    });
+  })();
+
   // ---- Persist on change --------------------------------------------------
   function persist() {
     chrome.storage.local.set({

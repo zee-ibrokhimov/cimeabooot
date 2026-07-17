@@ -169,6 +169,12 @@
       <div class="action-section">
         <button class="primary-btn" id="startBtn"><span class="btn-icon">⚡</span> <span data-i18n="start_btn">Start Automation</span></button>
       </div>
+
+      <details class="panel" style="margin-top:12px;">
+        <summary style="cursor:pointer;font-weight:600;list-style:none;">🩺 Diagnostics <span id="buildTag" class="hint" style="float:right;font-weight:400;"></span></summary>
+        <p class="hint" style="margin-top:8px;">Why it reloaded (newest first) — survives reloads:</p>
+        <div id="reloadLog" style="max-height:150px;overflow-y:auto;font-size:11px;color:#94a3b8;"></div>
+      </details>
     </main>
 
     <footer class="footer">
